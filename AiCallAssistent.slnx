@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="AiCallAssistent.API/AiCallAssistent.API.csproj" />
   <Project Path="AiCallAssistent.Application/AiCallAssistent.Application.csproj" />
-  <Project Path="AiCallAssistent.DomainTwo/AiCallAssistent.DomainTwo.csproj" />
+  <Project Path="AiCallAssistent.Domain/AiCallAssistent.Domain.csproj" />
   <Project Path="AiCallAssistent.Infrastructure/AiCallAssistent.Infrastructure.csproj" />
+  <Project Path="AiCallAssistent.WebAPI/AiCallAssistent.WebAPI.csproj" />
 </Solution>
