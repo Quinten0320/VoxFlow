@@ -32,10 +32,7 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         return Ok(settings);
     }
 
-    /// <summary>
-    /// Creates or updates assistant settings for the company.
-    /// Safe to call even if no row exists yet.
-    /// </summary>
+    /// <summary>Creates or updates assistant settings (upsert).</summary>
     [HttpPut]
     public async Task<IActionResult> Upsert([FromBody] UpdateAssistantSettingsRequest request)
     {

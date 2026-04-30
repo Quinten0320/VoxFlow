@@ -194,7 +194,7 @@ public class TestFlowController : ControllerBase
     {
         var response = new TestFlowResponse();
 
-        // ── Step 1: get appointment types ────────────────────────────────────
+        // Step 1: get appointment types
         try
         {
             var types = await _appointmentService.GetAppointmentTypesAsync(request.CompanyId);
@@ -215,7 +215,7 @@ public class TestFlowController : ControllerBase
             return Ok(response);
         }
 
-        // ── Step 2: find soonest available slot ──────────────────────────────
+        // Step 2: find soonest available slot
         SoonestAvailableResponse? soonest;
         try
         {
@@ -243,7 +243,7 @@ public class TestFlowController : ControllerBase
             return Ok(response);
         }
 
-        // ── Step 3: create appointment at the soonest slot ───────────────────
+        // Step 3: create appointment at the soonest slot
         try
         {
             var createRequest = new CreateAppointmentRequest

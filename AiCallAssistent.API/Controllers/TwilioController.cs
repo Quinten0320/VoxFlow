@@ -15,13 +15,9 @@ using Microsoft.Extensions.Options;
 namespace AiCallAssistent.API.Controllers;
 
 /// <summary>
-/// Handles the full inbound call flow: Twilio → Deepgram → Gemini → ElevenLabs → Twilio.
-///
-/// Setup:
-///   1. Set Twilio:BaseUrl to your public URL (ngrok in dev).
-///   2. Point the Twilio number's Voice webhook to POST {BaseUrl}/api/twilio/answer.
-///   3. Point the Status Callback to POST {BaseUrl}/api/twilio/status.
-///   4. Add Twilio:AccountSid + Twilio:AuthToken to User Secrets.
+/// Inbound call flow: Twilio / Deepgram / Gemini / ElevenLabs.
+/// Voice webhook: POST {Twilio:BaseUrl}/api/twilio/answer
+/// Status callback: POST {Twilio:BaseUrl}/api/twilio/status
 /// </summary>
 [ApiController]
 [Route("api/twilio")]
@@ -282,10 +278,7 @@ public class TwilioController : ControllerBase
         return File(result.Value.Audio, result.Value.ContentType);
     }
 
-    /// <summary>
-    /// Twilio calls this when the call ends. Generates a summary and saves it.
-    /// Must return 200 — Twilio retries on non-2xx.
-    /// </summary>
+    /// <summary>Must return 200 — Twilio retries on non-2xx.</summary>
     [HttpPost("status")]
     [Consumes("application/x-www-form-urlencoded")]
     [ValidateTwilioRequest]

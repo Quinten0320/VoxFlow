@@ -17,7 +17,7 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Paste your Supabase access_token here."
+        Description = "Supabase access_token (JWT)"
     });
     options.AddSecurityRequirement(new OpenApiSecurityRequirement
     {

@@ -13,9 +13,8 @@ public abstract class DashboardControllerBase(AppDbContext db) : ControllerBase
     protected AppDbContext Db { get; } = db;
 
     /// <summary>
-    /// Resolves the company ID for the authenticated user by matching the JWT sub claim
-    /// to employee.auth_user_id. Returns a 401 if the sub claim is missing, or 403 if
-    /// no active employee record is linked to this auth user.
+    /// Resolves the company ID by matching the JWT sub claim to employee.auth_user_id.
+    /// Returns 401 if the claim is missing, 403 if no active employee is linked.
     /// </summary>
     protected async Task<(short companyId, IActionResult? error)> GetCompanyIdAsync()
     {
@@ -32,8 +31,7 @@ public abstract class DashboardControllerBase(AppDbContext db) : ControllerBase
         if (companyId == null)
             return (0, StatusCode(403, new
             {
-                error = "No active employee record linked to this account",
-                hint = "Set auth_user_id on the employee row in Supabase"
+                error = "No active employee record linked to this account"
             }));
 
         return (companyId.Value, null);

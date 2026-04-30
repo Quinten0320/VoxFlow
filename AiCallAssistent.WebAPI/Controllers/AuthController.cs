@@ -8,10 +8,6 @@ namespace AiCallAssistent.WebAPI.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
-    /// <summary>
-    /// Returns the current user's identity from the JWT.
-    /// Use this to verify that the token is valid and auth is working.
-    /// </summary>
     [Authorize]
     [HttpGet("me")]
     public IActionResult Me()
@@ -21,10 +17,6 @@ public class AuthController : ControllerBase
         var email = User.FindFirstValue(ClaimTypes.Email)
                     ?? User.FindFirstValue("email");
 
-        return Ok(new
-        {
-            UserId = userId,
-            Email = email
-        });
+        return Ok(new { UserId = userId, Email = email });
     }
 }

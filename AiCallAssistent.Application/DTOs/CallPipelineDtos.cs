@@ -1,7 +1,7 @@
 namespace AiCallAssistent.Application.DTOs;
 
 /// <summary>
-/// Per-call context passed through the pipeline (controller → Gemini → dispatcher).
+/// Per-call context passed through the pipeline (controller, Gemini, dispatcher).
 /// CallerNumber is the hook for future caller recognition: look up previous call_sessions
 /// and pass the history as additional context before the conversation starts.
 /// </summary>
