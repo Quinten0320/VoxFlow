@@ -28,5 +28,8 @@ public class Company
     [Column("is_active")]
     public bool IsActive { get; set; }
 
+    [Column("branch")]
+    public string? Branch { get; set; }
+
     public ICollection<Employee> Employees { get; set; } = [];
 }

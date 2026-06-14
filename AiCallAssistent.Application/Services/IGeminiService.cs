@@ -18,4 +18,11 @@ public interface IGeminiService
     /// Returns an empty string if the conversation is not found or Gemini fails.
     /// </summary>
     Task<string> SummarizeConversationAsync(string conversationId);
+
+    /// <summary>
+    /// Classifies the caller based on the full conversation history.
+    /// Returns one of: "lead", "verkoper", "informatie", "overig".
+    /// Never throws — returns "overig" on any failure.
+    /// </summary>
+    Task<string> ClassifyCallerAsync(string conversationId);
 }

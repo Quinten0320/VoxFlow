@@ -4,10 +4,15 @@ public class TwilioSettings
 {
     public string AccountSid { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
+    public string ApiKeySid { get; set; } = string.Empty;
+    public string ApiKeySecret { get; set; } = string.Empty;
 
     /// <summary>Public base URL used to build webhook callback URLs (ngrok in dev).</summary>
     public string BaseUrl { get; set; } = string.Empty;
 
     /// <summary>E.164 Twilio WhatsApp-enabled number. Leave empty to disable WhatsApp messaging.</summary>
     public string WhatsAppFrom { get; set; } = string.Empty;
+
+    /// <summary>Twilio REST API base URL. Use https://api.eu.twilio.com for EU edge routing.</summary>
+    public string ApiBaseUrl { get; set; } = "https://api.eu.twilio.com";
 }

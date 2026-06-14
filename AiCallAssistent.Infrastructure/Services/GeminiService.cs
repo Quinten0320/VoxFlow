@@ -3,8 +3,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AiCallAssistent.Application.Configuration;
+using AiCallAssistent.Application.Constants;
 using AiCallAssistent.Application.DTOs;
-using AiCallAssistent.Application.Helpers;
 using AiCallAssistent.Application.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,28 +16,31 @@ public class GeminiService : IGeminiService
     private readonly HttpClient _http;
     private readonly IGeminiFunctionDispatcher _dispatcher;
     private readonly IConversationStore _conversations;
+    private readonly IVertexAiTokenProvider _tokenProvider;
     private readonly GeminiSettings _settings;
     private readonly ILogger<GeminiService> _logger;
 
-    // Tool declarations don't change at runtime, so serialize them once at startup.
-    private readonly string _toolsJson;
-
-    private const string BaseUrl = "https://generativelanguage.googleapis.com/v1beta/models";
     private const int MaxIterations = 8;
+
+    private string EndpointBase =>
+        $"https://{_settings.Location}-aiplatform.googleapis.com/v1" +
+        $"/projects/{_settings.ProjectId}/locations/{_settings.Location}" +
+        $"/publishers/google/models";
 
     public GeminiService(
         HttpClient http,
         IGeminiFunctionDispatcher dispatcher,
         IConversationStore conversations,
+        IVertexAiTokenProvider tokenProvider,
         IOptions<GeminiSettings> settings,
         ILogger<GeminiService> logger)
     {
         _http = http;
         _dispatcher = dispatcher;
         _conversations = conversations;
+        _tokenProvider = tokenProvider;
         _settings = settings.Value;
         _logger = logger;
-        _toolsJson = new JsonArray { dispatcher.GetToolDeclarations() }.ToJsonString();
     }
 
     public async Task<GeminiTestResponse> RunConversationAsync(
@@ -49,9 +52,11 @@ public class GeminiService : IGeminiService
         conversationId ??= Guid.NewGuid().ToString();
         var logs = new List<GeminiFunctionCallLog>();
         string? pendingEscalation = null;
+        string? pendingFallback = null;
+        string? pendingAutoTransfer = null;
 
         var contents = _conversations.Load(conversationId);
-        contents.Add(UserTurn(userMessage));
+        contents.Add(GeminiRequestBuilder.UserTurn(userMessage));
 
         for (var iteration = 0; iteration < MaxIterations; iteration++)
         {
@@ -66,7 +71,7 @@ public class GeminiService : IGeminiService
             if (part["text"] is JsonNode textNode)
             {
                 var text = textNode.GetValue<string>();
-                contents.Add(ModelTextTurn(text));
+                contents.Add(GeminiRequestBuilder.ModelTextTurn(text));
                 _conversations.Save(conversationId, contents);
 
                 return new GeminiTestResponse
@@ -77,7 +82,9 @@ public class GeminiService : IGeminiService
                     Iterations = iteration + 1,
                     ConversationId = conversationId,
                     TotalMessages = contents.Count,
-                    EscalationNumber = pendingEscalation
+                    EscalationNumber = pendingEscalation,
+                    FallbackNumber = pendingFallback,
+                    AutoTransferNumber = pendingAutoTransfer
                 };
             }
 
@@ -86,7 +93,7 @@ public class GeminiService : IGeminiService
                 var funcName = functionCall["name"]!.GetValue<string>();
                 var funcArgs = functionCall["args"];
 
-                contents.Add(ModelFunctionCallTurn(functionCall));
+                contents.Add(GeminiRequestBuilder.ModelFunctionCallTurn(functionCall));
 
                 var log = new GeminiFunctionCallLog
                 {
@@ -99,16 +106,34 @@ public class GeminiService : IGeminiService
                     var result = await _dispatcher.DispatchAsync(context, funcName, funcArgs);
                     log.Result = result;
                     log.Success = true;
-                    contents.Add(FunctionResponseTurn(funcName, new JsonObject { ["result"] = JsonSerializer.SerializeToNode(result) }));
+                    contents.Add(GeminiRequestBuilder.FunctionResponseTurn(funcName, new JsonObject { ["result"] = JsonSerializer.SerializeToNode(result) }));
 
                     if (funcName == "transfer_to_human" && context.EscalationNumber is { Length: > 0 })
+                    {
                         pendingEscalation = context.EscalationNumber;
+                    }
+                    else if (funcName == "transfer_to_department")
+                    {
+                        var deptName = funcArgs?["department_name"]?.GetValue<string>();
+                        if (deptName is { Length: > 0 } &&
+                            context.DepartmentPhones?.TryGetValue(deptName, out var deptPhone) == true)
+                        {
+                            pendingEscalation = deptPhone;
+                            pendingFallback = context.EscalationNumber; // main number as fallback if dept doesn't answer
+                        }
+                    }
+                    else if (funcName == "create_appointment" &&
+                             result is AiCallAssistent.Application.DTOs.AppointmentResponse apt &&
+                             apt.AutoTransferNumber is { Length: > 0 })
+                    {
+                        pendingAutoTransfer = apt.AutoTransferNumber;
+                    }
                 }
                 catch (Exception ex)
                 {
                     log.Success = false;
                     log.Error = ex.Message;
-                    contents.Add(FunctionResponseTurn(funcName, new JsonObject { ["error"] = ex.Message }));
+                    contents.Add(GeminiRequestBuilder.FunctionResponseTurn(funcName, new JsonObject { ["error"] = ex.Message }));
                 }
 
                 logs.Add(log);
@@ -124,13 +149,16 @@ public class GeminiService : IGeminiService
     private async Task<GeminiCallResult> CallGeminiAsync(
         string contentsJson, CallDispatchContext context, CompanyCallConfig? config)
     {
-        var requestBytes = BuildRequestBytes(contentsJson, context, config);
-        var url = $"{BaseUrl}/{_settings.Model}:generateContent?key={_settings.ApiKey}";
+        var requestBytes = GeminiRequestBuilder.BuildRequestBytes(contentsJson, context, config, _dispatcher, _settings);
+        var token = await _tokenProvider.GetAccessTokenAsync();
+        var url = $"{EndpointBase}/{_settings.Model}:generateContent";
 
-        using var content = new ByteArrayContent(requestBytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        request.Content = new ByteArrayContent(requestBytes);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        var httpResponse = await _http.PostAsync(url, content);
+        var httpResponse = await _http.SendAsync(request);
         var responseJson = await httpResponse.Content.ReadAsStringAsync();
 
         if (!httpResponse.IsSuccessStatusCode)
@@ -152,64 +180,6 @@ public class GeminiService : IGeminiService
         return GeminiCallResult.Ok(firstPart);
     }
 
-    private byte[] BuildRequestBytes(string contentsJson, CallDispatchContext context, CompanyCallConfig? config)
-    {
-        var nowNl = NlTimeZone.Now;
-        var buffer = new ArrayBufferWriter<byte>(initialCapacity: 8192);
-        using var writer = new Utf8JsonWriter(buffer);
-
-        writer.WriteStartObject();
-
-        writer.WritePropertyName("system_instruction");
-        writer.WriteStartObject();
-        writer.WritePropertyName("parts");
-        writer.WriteStartArray();
-        writer.WriteStartObject();
-
-        var systemPrompt = config?.SystemPrompt is { Length: > 0 } p ? p : null;
-        writer.WriteString("text", systemPrompt ??
-            $"""
-            Je bent een vriendelijke AI-telefoonassistent die afspraken boekt voor bedrijf met ID {context.CompanyId}.
-            Help de beller een afspraak te plannen via de beschikbare tools.
-            Bevestig altijd de afspraakdetails voordat je daadwerkelijk een boeking maakt.
-            Spreek altijd en uitsluitend Nederlands — gebruik nooit een andere taal.
-            Praat natuurlijk en beknopt, alsof je aan de telefoon bent.
-            Alle tijden zijn in Nederlandse lokale tijd (Europe/Amsterdam).
-            Vandaag is {nowNl:dddd, d MMMM yyyy} en de huidige tijd is {nowNl:HH:mm}.
-            Los relatieve datums zoals "morgen", "volgende maandag" of "aanstaande dinsdag" op met de datum van vandaag.
-            Vraag de beller nooit om een datum die je zelf kunt berekenen.
-
-            REGELS VOOR TOOLS:
-            - Zeg nooit "momentje" of "ik zoek het even op" voordat je een tool aanroept. Roep de tool meteen aan en geef daarna pas antwoord.
-            - Vraagt de beller welke afspraken beschikbaar zijn? Roep ONMIDDELLIJK get_appointment_types aan. Reageer niet eerst met tekst.
-            - Wil de beller boeken of vraagt hij naar beschikbaarheid? Roep ONMIDDELLIJK get_soonest_available of check_availability aan.
-            - Haal altijd actuele data op via de tools voordat je antwoord geeft over diensten, beschikbaarheid of tijden.
-            """);
-
-        writer.WriteEndObject();
-        writer.WriteEndArray();
-        writer.WriteEndObject();
-
-        writer.WritePropertyName("contents");
-        writer.WriteRawValue(contentsJson);
-
-        writer.WritePropertyName("tools");
-        writer.WriteRawValue(_toolsJson);
-
-        writer.WritePropertyName("tool_config");
-        writer.WriteStartObject();
-        writer.WritePropertyName("function_calling_config");
-        writer.WriteStartObject();
-        writer.WriteString("mode", "AUTO");
-        writer.WriteEndObject();
-        writer.WriteEndObject();
-
-        writer.WriteEndObject();
-        writer.Flush();
-
-        return buffer.WrittenSpan.ToArray();
-    }
-
     public async Task<string> SummarizeConversationAsync(string conversationId)
     {
         try
@@ -221,13 +191,23 @@ public class GeminiService : IGeminiService
                 return string.Empty;
             }
 
-            var requestBytes = BuildSummaryRequestBytes(contents.ToJsonString());
-            var url = $"{BaseUrl}/{_settings.Model}:generateContent?key={_settings.ApiKey}";
+            var textContents = ExtractConversationForSummary(contents);
+            if (textContents.Count == 0)
+            {
+                _logger.LogWarning("SummarizeConversation: no text turns for {ConversationId}", conversationId);
+                return string.Empty;
+            }
 
-            using var content = new ByteArrayContent(requestBytes);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            var requestBytes = BuildSummaryRequestBytes(textContents.ToJsonString());
+            var token = await _tokenProvider.GetAccessTokenAsync();
+            var url = $"{EndpointBase}/{_settings.Model}:generateContent";
 
-            var httpResponse = await _http.PostAsync(url, content);
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = new ByteArrayContent(requestBytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var httpResponse = await _http.SendAsync(request);
 
             if (!httpResponse.IsSuccessStatusCode)
             {
@@ -240,11 +220,11 @@ public class GeminiService : IGeminiService
 
             var responseJson = await httpResponse.Content.ReadAsStringAsync();
             var root = JsonNode.Parse(responseJson);
-            var summary = root?["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.GetValue<string>()
-                          ?? string.Empty;
+            var summary = ExtractText(root) ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(summary))
-                _logger.LogWarning("Gemini returned an empty summary for {ConversationId}", conversationId);
+                _logger.LogWarning("Gemini returned an empty summary for {ConversationId}. Response: {Response}",
+                    conversationId, responseJson);
 
             return summary;
         }
@@ -253,6 +233,136 @@ public class GeminiService : IGeminiService
             _logger.LogError(ex, "SummarizeConversation threw for {ConversationId}", conversationId);
             return string.Empty;
         }
+    }
+
+    public async Task<string> ClassifyCallerAsync(string conversationId)
+    {
+        try
+        {
+            var contents = _conversations.Load(conversationId);
+            if (contents.Count == 0) return CallerClassification.Overig;
+
+            var textContents = ExtractConversationForSummary(contents);
+            var requestBytes = BuildClassificationRequestBytes(
+                textContents.Count > 0 ? textContents.ToJsonString() : contents.ToJsonString());
+            var token = await _tokenProvider.GetAccessTokenAsync();
+            var url = $"{EndpointBase}/{_settings.Model}:generateContent";
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = new ByteArrayContent(requestBytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var httpResponse = await _http.SendAsync(request);
+            if (!httpResponse.IsSuccessStatusCode) return CallerClassification.Overig;
+
+            var responseJson = await httpResponse.Content.ReadAsStringAsync();
+            var root = JsonNode.Parse(responseJson);
+            var raw = ExtractText(root) ?? string.Empty;
+
+            var classification = raw.Trim().ToLowerInvariant();
+            return classification is CallerClassification.Lead
+                or CallerClassification.Verkoper
+                or CallerClassification.Informatie
+                ? classification
+                : CallerClassification.Overig;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ClassifyCallerAsync failed for {ConversationId}", conversationId);
+            return CallerClassification.Overig;
+        }
+    }
+
+    // For summarization: strip function-call mechanics, then skip the seeded prolog
+    // (appointment-type / department seed turns) so Gemini only sees actual dialogue.
+    // The seeded turns leave consecutive user-role entries after stripping, which
+    // causes Gemini to return an empty response.
+    private static JsonArray ExtractConversationForSummary(JsonArray contents)
+    {
+        var textOnly = StripFunctionCallTurns(contents);
+
+        // The first model turn is always the welcome message — start there.
+        for (var i = 0; i < textOnly.Count; i++)
+        {
+            if ((textOnly[i] as JsonObject)?["role"]?.GetValue<string>() == "model")
+            {
+                var result = new JsonArray();
+                for (var j = i; j < textOnly.Count; j++)
+                    result.Add(textOnly[j]!.DeepClone());
+                return result;
+            }
+        }
+        return textOnly;
+    }
+
+    private static JsonArray StripFunctionCallTurns(JsonArray contents)
+    {
+        var result = new JsonArray();
+        foreach (var turn in contents)
+        {
+            if (turn is not JsonObject turnObj) continue;
+            var parts = turnObj["parts"]?.AsArray();
+            if (parts is null) continue;
+
+            var textParts = new JsonArray();
+            foreach (var part in parts)
+            {
+                if (part?["functionCall"] is null && part?["functionResponse"] is null
+                    && part?["thought"]?.GetValue<bool>() != true
+                    && part?["text"] is not null)
+                {
+                    textParts.Add(part!.DeepClone());
+                }
+            }
+
+            if (textParts.Count > 0)
+                result.Add(new JsonObject { ["role"] = turnObj["role"]?.DeepClone(), ["parts"] = textParts });
+        }
+        return result;
+    }
+
+    private static string? ExtractText(JsonNode? root)
+    {
+        var parts = root?["candidates"]?[0]?["content"]?["parts"]?.AsArray();
+        return parts?
+            .FirstOrDefault(p => p?["thought"]?.GetValue<bool>() != true && p?["text"] is not null)?
+            ["text"]?.GetValue<string>();
+    }
+
+    private static byte[] BuildClassificationRequestBytes(string contentsJson)
+    {
+        var buffer = new ArrayBufferWriter<byte>(initialCapacity: 4096);
+        using var writer = new Utf8JsonWriter(buffer);
+
+        writer.WriteStartObject();
+
+        writer.WritePropertyName("system_instruction");
+        writer.WriteStartObject();
+        writer.WritePropertyName("parts");
+        writer.WriteStartArray();
+        writer.WriteStartObject();
+        writer.WriteString("text",
+            """
+            Analyseer het volgende telefoongesprek en classificeer de beller in één van deze categorieën:
+            - lead: echte potentiële klant met koopintentie
+            - verkoper: vertegenwoordiger of acquiteur die iets wil verkopen
+            - informatie: belt alleen voor informatie, geen koopintentie
+            - overig: past niet in bovenstaande categorieën
+
+            Antwoord ALLEEN met één woord: lead, verkoper, informatie, of overig.
+            """);
+        writer.WriteEndObject();
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+
+        writer.WritePropertyName("contents");
+        writer.WriteRawValue(contentsJson);
+
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return buffer.WrittenSpan.ToArray();
     }
 
     private static byte[] BuildSummaryRequestBytes(string contentsJson)
@@ -285,41 +395,6 @@ public class GeminiService : IGeminiService
 
         return buffer.WrittenSpan.ToArray();
     }
-
-    private static JsonObject UserTurn(string text) => new()
-    {
-        ["role"] = "user",
-        ["parts"] = new JsonArray { new JsonObject { ["text"] = text } }
-    };
-
-    private static JsonObject ModelTextTurn(string text) => new()
-    {
-        ["role"] = "model",
-        ["parts"] = new JsonArray { new JsonObject { ["text"] = text } }
-    };
-
-    private static JsonObject ModelFunctionCallTurn(JsonObject functionCall) => new()
-    {
-        ["role"] = "model",
-        // functionCall is a child node of the parsed response — DeepClone before reparenting
-        ["parts"] = new JsonArray { new JsonObject { ["functionCall"] = functionCall.DeepClone() } }
-    };
-
-    private static JsonObject FunctionResponseTurn(string name, JsonObject response) => new()
-    {
-        ["role"] = "user",
-        ["parts"] = new JsonArray
-        {
-            new JsonObject
-            {
-                ["functionResponse"] = new JsonObject
-                {
-                    ["name"] = name,
-                    ["response"] = response
-                }
-            }
-        }
-    };
 
     private static GeminiTestResponse ErrorResponse(string error, List<GeminiFunctionCallLog> logs,
         int iterations, string conversationId, int totalMessages) => new()

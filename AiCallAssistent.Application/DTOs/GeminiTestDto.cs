@@ -20,10 +20,22 @@ public class GeminiTestResponse
     public int TotalMessages { get; set; }
 
     /// <summary>
-    /// Set when Gemini dispatched transfer_to_human this turn.
+    /// Set when Gemini dispatched transfer_to_human or transfer_to_department this turn.
     /// The TwilioController replaces the &lt;Record&gt; verb with &lt;Dial&gt; to this number.
     /// </summary>
     public string? EscalationNumber { get; set; }
+
+    /// <summary>
+    /// Set when transferring to a department. If the department does not answer,
+    /// Twilio falls back to this number (typically the main escalation number).
+    /// </summary>
+    public string? FallbackNumber { get; set; }
+
+    /// <summary>
+    /// Set when create_appointment completed and the appointment type has auto-transfer enabled.
+    /// The TwilioController plays the reply audio then dials this number.
+    /// </summary>
+    public string? AutoTransferNumber { get; set; }
 }
 
 public class GeminiFunctionCallLog

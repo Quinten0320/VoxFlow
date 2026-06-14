@@ -5,12 +5,14 @@ using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace AiCallAssistent.Infrastructure.Services;
 
 public class AppointmentService : IAppointmentService
 {
     private readonly AppDbContext _db;
+    private readonly IOpeningHoursService _openingHours;
     private readonly IOutlookCalendarService _outlookCalendar;
     private readonly ILogger<AppointmentService> _logger;
 
@@ -19,10 +21,12 @@ public class AppointmentService : IAppointmentService
 
     public AppointmentService(
         AppDbContext db,
+        IOpeningHoursService openingHours,
         IOutlookCalendarService outlookCalendar,
         ILogger<AppointmentService> logger)
     {
         _db = db;
+        _openingHours = openingHours;
         _outlookCalendar = outlookCalendar;
         _logger = logger;
     }
@@ -36,7 +40,8 @@ public class AppointmentService : IAppointmentService
             {
                 Name = t.Name,
                 DisplayName = t.DisplayName,
-                DurationMinutes = t.DurationMinutes
+                DurationMinutes = t.DurationMinutes,
+                WaitTime = t.WaitTime
             })
             .ToListAsync();
     }
@@ -51,7 +56,15 @@ public class AppointmentService : IAppointmentService
         var dateNl = DateOnly.FromDateTime(startNl.DateTime);
         var timeNl = TimeOnly.FromDateTime(startNl.DateTime);
 
-        var ranges = await GetOpeningRangesAsync(request.CompanyId, dateNl);
+        if (typeConfig.WaitTime > 0)
+        {
+            var earliestNl = DateOnly.FromDateTime(NlTimeZone.Now.DateTime).AddDays(typeConfig.WaitTime);
+            if (dateNl < earliestNl)
+                throw new ArgumentException(
+                    $"'{typeConfig.DisplayName}' requires at least {typeConfig.WaitTime} day(s) notice. Earliest available date: {earliestNl:yyyy-MM-dd}.");
+        }
+
+        var ranges = await _openingHours.GetOpeningRangesForDateAsync(request.CompanyId, dateNl);
         if (ranges.Count == 0)
             throw new ArgumentException("The company is closed on the selected day.");
 
@@ -68,14 +81,6 @@ public class AppointmentService : IAppointmentService
             ? await ValidateEmployeeAsync(request.EmployeeId.Value, request.CompanyId)
             : await FindAvailableEmployeeIdAsync(request.CompanyId, startUtc, endUtc);
 
-        var hasConflict = await _db.Appointments.AnyAsync(a =>
-            a.EmployeeId == employeeId &&
-            a.StartTime < endUtc &&
-            a.EndTime > startUtc);
-
-        if (hasConflict)
-            throw new InvalidOperationException("The selected time slot is already booked for this employee.");
-
         var appointment = new Appointment
         {
             CompanyId = request.CompanyId,
@@ -84,18 +89,28 @@ public class AppointmentService : IAppointmentService
             Description = request.Description,
             StartTime = startUtc,
             EndTime = endUtc,
+            CallerPhoneNumber = request.CallerPhoneNumber,
             CreatedAt = DateTimeOffset.UtcNow
         };
 
         _db.Appointments.Add(appointment);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException pg && pg.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            throw new InvalidOperationException("The selected time slot is already booked for this employee.", ex);
+        }
 
         var employeeName = await _db.Employees
             .Where(e => e.EmployeeId == employeeId)
             .Select(e => e.Name)
             .FirstAsync();
 
-        var syncToCalendar = await _db.Set<AiCallAssistent.Domain.Models.AssistantSettings>()
+        var syncToCalendar = await _db.Set<AssistantSettings>()
             .Where(s => s.CompanyId == request.CompanyId)
             .Select(s => (bool?)s.AppointmentsAutomaticallyToCalendar)
             .FirstOrDefaultAsync() ?? false;
@@ -116,6 +131,17 @@ public class AppointmentService : IAppointmentService
             }
         }
 
+        // Resolve auto-transfer department phone if configured for this appointment type.
+        string? autoTransferNumber = null;
+        if (typeConfig.AutoTransferEnabled && typeConfig.AutoTransferDepartmentId.HasValue)
+        {
+            autoTransferNumber = await _db.CompanyDepartments
+                .Where(d => d.DepartmentId == typeConfig.AutoTransferDepartmentId.Value
+                         && d.CompanyId == request.CompanyId && d.IsActive)
+                .Select(d => (string?)d.PhoneNumber)
+                .FirstOrDefaultAsync();
+        }
+
         return new AppointmentResponse
         {
             AppointmentId = appointment.AppointmentId,
@@ -125,7 +151,8 @@ public class AppointmentService : IAppointmentService
             Type = appointment.Type,
             Description = appointment.Description,
             StartTime = NlTimeZone.ConvertFromUtc(appointment.StartTime),
-            EndTime = NlTimeZone.ConvertFromUtc(appointment.EndTime)
+            EndTime = NlTimeZone.ConvertFromUtc(appointment.EndTime),
+            AutoTransferNumber = autoTransferNumber
         };
     }
 
@@ -135,7 +162,7 @@ public class AppointmentService : IAppointmentService
             .FirstOrDefaultAsync(t => t.CompanyId == companyId && t.Name == type && t.IsActive)
             ?? throw new ArgumentException($"Appointment type '{type}' is not available for this company.");
 
-        var ranges = await GetOpeningRangesAsync(companyId, date);
+        var ranges = await _openingHours.GetOpeningRangesForDateAsync(companyId, date);
         if (ranges.Count == 0)
             return new AvailabilityResponse
             {
@@ -186,13 +213,16 @@ public class AppointmentService : IAppointmentService
         var nowNl = NlTimeZone.Now;
         var todayNl = DateOnly.FromDateTime(nowNl.DateTime);
 
-        for (var dayOffset = 0; dayOffset < 60; dayOffset++)
+        for (var dayOffset = typeConfig.WaitTime; dayOffset < 60 + typeConfig.WaitTime; dayOffset++)
         {
             var checkDate = todayNl.AddDays(dayOffset);
-            var ranges = await GetOpeningRangesAsync(companyId, checkDate);
+            var ranges = await _openingHours.GetOpeningRangesForDateAsync(companyId, checkDate);
             if (ranges.Count == 0) continue;
 
             var bookedSlots = await GetBookedSlotsAsync(companyId, checkDate, ranges);
+
+            // Collect the earliest valid slot across ALL employees for this day.
+            (DateTimeOffset Start, DateTimeOffset End, EmployeeInfo Employee)? earliest = null;
 
             foreach (var employee in employees)
             {
@@ -206,6 +236,12 @@ public class AppointmentService : IAppointmentService
                 if (validSlots.Count == 0) continue;
 
                 var first = validSlots[0];
+                if (earliest is null || first.Start < earliest.Value.Start)
+                    earliest = (first.Start, first.End, employee);
+            }
+
+            if (earliest is not null)
+            {
                 return new SoonestAvailableResponse
                 {
                     CompanyId = companyId,
@@ -213,10 +249,10 @@ public class AppointmentService : IAppointmentService
                     DurationMinutes = typeConfig.DurationMinutes,
                     SoonestSlot = new TimeSlotResponse
                     {
-                        EmployeeId = employee.Id,
-                        EmployeeName = employee.Name,
-                        StartTime = first.Start,
-                        EndTime = first.End
+                        EmployeeId = earliest.Value.Employee.Id,
+                        EmployeeName = earliest.Value.Employee.Name,
+                        StartTime = earliest.Value.Start,
+                        EndTime = earliest.Value.End
                     }
                 };
             }
@@ -225,40 +261,18 @@ public class AppointmentService : IAppointmentService
         return new SoonestAvailableResponse { CompanyId = companyId, Type = type, DurationMinutes = typeConfig.DurationMinutes };
     }
 
-    private async Task<List<(TimeOnly Start, TimeOnly End)>> GetOpeningRangesAsync(short companyId, DateOnly date)
+    public async Task<bool> CancelAppointmentAsync(long appointmentId, short companyId)
     {
-        // Check for a date-specific exception first (holiday, special hours, etc.)
-        var exception = await _db.CompanyOpeningExceptions
-            .Include(e => e.TimeRanges)
-            .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.ExceptionDate == date && e.IsActive);
+        var rows = await _db.Appointments
+            .Where(a => a.AppointmentId == appointmentId && a.CompanyId == companyId)
+            .ExecuteDeleteAsync();
 
-        if (exception is not null)
-        {
-            if (exception.IsClosed) return [];
-            return exception.TimeRanges
-                .Where(r => r.IsActive)
-                .OrderBy(r => r.SortOrder)
-                .Select(r => (r.StartTime, r.EndTime))
-                .ToList();
-        }
-
-        var dbDay = ToDbDayOfWeek(date.DayOfWeek);
-        var openingHour = await _db.CompanyOpeningHours
-            .Include(h => h.TimeRanges)
-            .FirstOrDefaultAsync(h => h.CompanyId == companyId && h.DayOfWeek == dbDay && h.IsActive);
-
-        if (openingHour is null) return [];
-
-        return openingHour.TimeRanges
-            .Where(r => r.IsActive)
-            .OrderBy(r => r.SortOrder)
-            .Select(r => (r.StartTime, r.EndTime))
-            .ToList();
+        return rows > 0;
     }
 
     /// <summary>
-    /// Generates available slots by using range starts and booking end times as candidates.
-    /// This handles any gap left by an existing booking without relying on a fixed grid.
+    /// Generates available slots using range-start and booking-end times as candidates.
+    /// This correctly handles any gap left by existing bookings without a fixed grid.
     /// </summary>
     private static List<(DateTimeOffset Start, DateTimeOffset End)> GenerateSlots(
         DateOnly date,
@@ -342,26 +356,4 @@ public class AppointmentService : IAppointmentService
 
         return employeeId ?? throw new InvalidOperationException("No employee is available at the requested time.");
     }
-
-    public async Task<bool> CancelAppointmentAsync(long appointmentId, short companyId)
-    {
-        var rows = await _db.Appointments
-            .Where(a => a.AppointmentId == appointmentId && a.CompanyId == companyId)
-            .ExecuteDeleteAsync();
-
-        return rows > 0;
-    }
-
-    // DB convention: 1=Mon, 2=Tue, ..., 7=Sun
-    private static short ToDbDayOfWeek(DayOfWeek day) => day switch
-    {
-        DayOfWeek.Monday => 1,
-        DayOfWeek.Tuesday => 2,
-        DayOfWeek.Wednesday => 3,
-        DayOfWeek.Thursday => 4,
-        DayOfWeek.Friday => 5,
-        DayOfWeek.Saturday => 6,
-        DayOfWeek.Sunday => 7,
-        _ => throw new ArgumentOutOfRangeException(nameof(day))
-    };
 }

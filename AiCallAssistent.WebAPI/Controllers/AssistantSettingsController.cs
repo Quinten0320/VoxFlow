@@ -23,6 +23,10 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
                 s.Prompt,
                 s.Language,
                 s.GreetingsMessage,
+                s.AppointmentsAutomaticallyToCalendar,
+                s.AfterHoursMode,
+                s.CallMode,
+                s.BotActiveHoursEnabled,
                 s.UpdatedAt))
             .FirstOrDefaultAsync();
 
@@ -51,6 +55,10 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.Prompt = request.Prompt;
         settings.Language = request.Language;
         settings.GreetingsMessage = request.GreetingsMessage;
+        settings.AppointmentsAutomaticallyToCalendar = request.AppointmentsAutomaticallyToCalendar;
+        settings.AfterHoursMode = request.AfterHoursMode;
+        settings.CallMode = request.CallMode;
+        settings.BotActiveHoursEnabled = request.BotActiveHoursEnabled;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();

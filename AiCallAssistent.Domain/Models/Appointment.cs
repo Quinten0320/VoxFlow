@@ -31,6 +31,15 @@ public class Appointment
     [Column("end_time")]
     public DateTimeOffset EndTime { get; set; }
 
+    [Column("caller_phone_number")]
+    public string? CallerPhoneNumber { get; set; }
+
+    [Column("reminder_sent_at")]
+    public DateTimeOffset? ReminderSentAt { get; set; }
+
+    [Column("followup_sent_at")]
+    public DateTimeOffset? FollowupSentAt { get; set; }
+
     [ForeignKey(nameof(EmployeeId))]
     public Employee? Employee { get; set; }
 }

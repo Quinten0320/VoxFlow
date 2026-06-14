@@ -10,12 +10,13 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
 {
     /// <summary>
     /// Returns paginated call sessions for the company.
-    /// Query params: page (default 1), pageSize (default 20, max 100).
+    /// Query params: page (default 1), pageSize (default 20, max 100), classification (optional filter).
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20)
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? classification = null)
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
@@ -25,6 +26,9 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
         if (pageSize > 100) pageSize = 100;
 
         var baseQuery = Db.CallSessions.Where(s => s.CompanyId == companyId);
+
+        if (classification is { Length: > 0 })
+            baseQuery = baseQuery.Where(s => s.CallerClassification == classification);
 
         var totalCount = await baseQuery.CountAsync();
 
@@ -40,6 +44,7 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
                 s.EndedAt,
                 s.Status,
                 s.Summary,
+                s.CallerClassification,
                 s.CreatedAt))
             .ToListAsync();
 
@@ -63,6 +68,7 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
                 s.EndedAt,
                 s.Status,
                 s.Summary,
+                s.CallerClassification,
                 s.CreatedAt))
             .FirstOrDefaultAsync();
 

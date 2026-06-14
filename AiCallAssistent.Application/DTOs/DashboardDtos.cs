@@ -31,18 +31,25 @@ public record AppointmentTypeListDto(
     string Name,
     string DisplayName,
     int DurationMinutes,
-    bool IsActive);
+    short WaitTime,
+    bool IsActive,
+    bool AutoTransferEnabled,
+    long? AutoTransferDepartmentId);
 
 public record CreateAppointmentTypeRequest(
     string Name,
     string DisplayName,
-    int DurationMinutes);
+    int DurationMinutes,
+    short WaitTime = 0);
 
 public record UpdateAppointmentTypeRequest(
     string Name,
     string DisplayName,
     int DurationMinutes,
-    bool IsActive);
+    short WaitTime,
+    bool IsActive,
+    bool AutoTransferEnabled = false,
+    long? AutoTransferDepartmentId = null);
 
 public record AppointmentDto(
     long AppointmentId,
@@ -78,6 +85,7 @@ public record CallSessionDto(
     DateTimeOffset? EndedAt,
     string Status,
     string? Summary,
+    string? CallerClassification,
     DateTimeOffset CreatedAt);
 
 public record CallSessionPageDto(
@@ -142,13 +150,21 @@ public record AssistantSettingsDto(
     string Prompt,
     string Language,
     string? GreetingsMessage,
+    bool AppointmentsAutomaticallyToCalendar,
+    string? AfterHoursMode,
+    string CallMode,
+    bool BotActiveHoursEnabled,
     DateTimeOffset? UpdatedAt);
 
 public record UpdateAssistantSettingsRequest(
     long? VoiceId,
     string Prompt,
     string Language,
-    string? GreetingsMessage);
+    string? GreetingsMessage,
+    bool AppointmentsAutomaticallyToCalendar,
+    string? AfterHoursMode,
+    string CallMode = "first_line",
+    bool BotActiveHoursEnabled = false);
 
 public record PhoneNumberDto(
     long PhoneNumberId,
@@ -157,6 +173,24 @@ public record PhoneNumberDto(
     bool IsActive,
     DateTimeOffset CreatedAt);
 
+public record DepartmentListDto(
+    long DepartmentId,
+    string Name,
+    string DisplayName,
+    string PhoneNumber,
+    bool IsActive);
+
+public record CreateDepartmentRequest(
+    string Name,
+    string DisplayName,
+    string PhoneNumber);
+
+public record UpdateDepartmentRequest(
+    string Name,
+    string DisplayName,
+    string PhoneNumber,
+    bool IsActive);
+
 public record CreatePhoneNumberRequest(
     string AiPhoneNumber,
     string? EscalationPhoneNumber);
@@ -164,3 +198,99 @@ public record CreatePhoneNumberRequest(
 public record UpdatePhoneNumberRequest(
     string? EscalationPhoneNumber,
     bool IsActive);
+
+public record BlacklistEntryDto(
+    long BlacklistId,
+    string PhoneNumber,
+    string? Reason,
+    DateTimeOffset CreatedAt);
+
+public record CreateBlacklistEntryRequest(
+    string PhoneNumber,
+    string? Reason);
+
+public record CallbackRequestDto(
+    long CallbackRequestId,
+    string CallerNumber,
+    string CallerName,
+    string Reason,
+    DateTimeOffset ScheduledFrom,
+    DateTimeOffset ScheduledUntil,
+    string Status,
+    DateTimeOffset CreatedAt);
+
+public record UpdateCallbackStatusRequest(string Status);
+
+public record CompanyPackageDto(
+    int? MaxCallMinutes,
+    int? MaxWhatsAppPerMonth,
+    bool FeatureBlacklist,
+    bool FeatureCallbackRequests,
+    bool FeatureWhatsAppConfirmation,
+    bool FeatureWhatsAppReminders,
+    bool FeatureDepartmentRouting,
+    bool FeatureTransferToHuman,
+    bool FeatureAfterHoursMode,
+    bool FeatureBranchTools,
+    DateTimeOffset UpdatedAt);
+
+public record UpsertCompanyPackageRequest(
+    int? MaxCallMinutes,
+    int? MaxWhatsAppPerMonth,
+    bool FeatureBlacklist,
+    bool FeatureCallbackRequests,
+    bool FeatureWhatsAppConfirmation,
+    bool FeatureWhatsAppReminders,
+    bool FeatureDepartmentRouting,
+    bool FeatureTransferToHuman,
+    bool FeatureAfterHoursMode,
+    bool FeatureBranchTools);
+
+// ── Assistant Profiles ───────────────────────────────────────────────────────
+
+public record AssistantProfileDto(
+    int Id,
+    short CompanyId,
+    string Name,
+    bool IsActive,
+    string? SystemPrompt,
+    string? GreetingMessage,
+    string Language,
+    string CallMode,
+    string? AfterHoursMode,
+    bool BotActiveHoursEnabled,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public record CreateAssistantProfileRequest(
+    string Name,
+    string? SystemPrompt,
+    string? GreetingMessage,
+    string Language = "nl",
+    string CallMode = "first_line",
+    string? AfterHoursMode = null,
+    bool BotActiveHoursEnabled = false);
+
+public record UpdateAssistantProfileRequest(
+    string Name,
+    string? SystemPrompt,
+    string? GreetingMessage,
+    string Language,
+    string CallMode,
+    string? AfterHoursMode,
+    bool BotActiveHoursEnabled);
+
+// ── Bot Active Hours ─────────────────────────────────────────────────────────
+
+public record BotActiveHourDto(
+    int Id,
+    short DayOfWeek,
+    string OpenTime,
+    string CloseTime,
+    int? ProfileId);
+
+public record UpsertBotActiveHourRequest(
+    short DayOfWeek,
+    string OpenTime,
+    string CloseTime,
+    int? ProfileId = null);

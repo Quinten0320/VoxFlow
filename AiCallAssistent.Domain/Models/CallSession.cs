@@ -31,6 +31,9 @@ public class CallSession
     [Column("summary")]
     public string? Summary { get; set; }
 
+    [Column("caller_classification")]
+    public string? CallerClassification { get; set; }
+
     [Column("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
 }

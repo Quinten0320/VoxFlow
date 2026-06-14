@@ -23,10 +23,19 @@ public static class DependencyInjection
         // Max Auto Prepare=0: disables prepared statements (not supported in transaction mode)
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             + ";No Reset On Close=true;Max Auto Prepare=0";
-        services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
-        services.AddDbContextFactory<AppDbContext>(options => options.UseNpgsql(connectionString), ServiceLifetime.Scoped);
 
+        // AddDbContextFactory also registers AppDbContext as scoped — no separate AddDbContext needed.
+        services.AddDbContextFactory<AppDbContext>(
+            options => options.UseNpgsql(connectionString),
+            ServiceLifetime.Scoped);
+
+        services.AddScoped<ICompanyPackageService, CompanyPackageService>();
+        services.AddScoped<IOpeningHoursService, OpeningHoursService>();
+        services.AddScoped<IDepartmentService, DepartmentService>();
         services.AddScoped<IAppointmentService, AppointmentService>();
+        services.AddScoped<ICallbackService, CallbackService>();
+        services.AddScoped<IPropertyInfoProvider, StubPropertyInfoProvider>();
+        services.AddScoped<IBotScheduleService, BotScheduleService>();
 
         services.Configure<OutlookSettings>(configuration.GetSection("Outlook"));
         services.AddHttpClient<IOutlookCalendarService, OutlookCalendarService>();
@@ -37,7 +46,7 @@ public static class DependencyInjection
         {
             var settings = sp.GetRequiredService<IOptions<TwilioSettings>>().Value;
             var credentials = Convert.ToBase64String(
-                Encoding.ASCII.GetBytes($"{settings.AccountSid}:{settings.AuthToken}"));
+                Encoding.ASCII.GetBytes($"{settings.ApiKeySid}:{settings.ApiKeySecret}"));
             client.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Basic", credentials);
         });
@@ -48,13 +57,25 @@ public static class DependencyInjection
     }
 
     /// <summary>
+    /// Background services that run in the call pipeline API process.
+    /// </summary>
+    public static IServiceCollection AddBackgroundServices(this IServiceCollection services)
+    {
+        services.AddHostedService<AppointmentNotificationService>();
+        services.AddHostedService<DataRetentionService>();
+        return services;
+    }
+
+    /// <summary>
     /// Services only used by the call pipeline API.
     /// </summary>
     public static IServiceCollection AddCallPipelineInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<GeminiSettings>(configuration.GetSection("Gemini"));
+        services.AddSingleton<IVertexAiTokenProvider, VertexAiTokenProvider>();
         services.AddHttpClient<IGeminiService, GeminiService>();
         services.AddScoped<IGeminiFunctionDispatcher, GeminiFunctionDispatcher>();
+        services.AddScoped<ICallSetupService, CallSetupService>();
 
         services.AddSingleton<IConversationStore, InMemoryConversationStore>();
 
@@ -67,6 +88,10 @@ public static class DependencyInjection
         services.Configure<AssistantSettings>(configuration.GetSection("Assistant"));
 
         services.AddSingleton<IAudioStore, InMemoryAudioStore>();
+
+        services.AddTransient<IDeepgramStreamingService, DeepgramStreamingService>();
+        services.AddHttpClient<IElevenLabsStreamingService, ElevenLabsStreamingService>();
+        services.AddHttpClient<IGeminiStreamingService, GeminiStreamingService>();
 
         return services;
     }

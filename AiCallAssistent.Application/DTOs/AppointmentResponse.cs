@@ -10,4 +10,7 @@ public class AppointmentResponse
     public string Description { get; set; } = string.Empty;
     public DateTimeOffset StartTime { get; set; }
     public DateTimeOffset EndTime { get; set; }
+
+    /// <summary>Set when the appointment type has auto-transfer configured.</summary>
+    public string? AutoTransferNumber { get; set; }
 }
