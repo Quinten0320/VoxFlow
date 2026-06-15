@@ -227,6 +227,10 @@ public record UpdatePhoneNumberRequest(
     string? EscalationPhoneNumber,
     bool IsActive);
 
+public record AvailablePhoneNumberDto(string PhoneNumber, string FriendlyName);
+
+public record PurchasePhoneNumberRequest(string PhoneNumber);
+
 public record BlacklistEntryDto(
     long BlacklistId,
     string PhoneNumber,

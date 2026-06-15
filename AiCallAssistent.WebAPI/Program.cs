@@ -35,6 +35,9 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+builder.Services.AddMemoryCache();
+builder.Services.Configure<AiCallAssistent.Application.Configuration.AdminSettings>(
+    builder.Configuration.GetSection("Admin"));
 builder.Services.AddSharedInfrastructure(builder.Configuration);
 
 builder.Services.AddCors(options =>
