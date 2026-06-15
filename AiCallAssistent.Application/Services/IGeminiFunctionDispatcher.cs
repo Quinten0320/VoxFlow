@@ -5,6 +5,12 @@ namespace AiCallAssistent.Application.Services;
 
 public interface IGeminiFunctionDispatcher
 {
-    Task<object> DispatchAsync(CallDispatchContext context, string functionName, JsonNode? args);
+    Task<object> DispatchAsync(
+        CallDispatchContext context,
+        string functionName,
+        JsonNode? args,
+        IConversationStore? store = null,
+        string? conversationId = null);
+
     JsonObject GetToolDeclarations(string? branch = null, CompanyFeatures? features = null);
 }

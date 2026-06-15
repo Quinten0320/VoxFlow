@@ -29,6 +29,12 @@ public class Employee
     [Column("auth_user_id")]
     public Guid? AuthUserId { get; set; }
 
+    [Column("role")]
+    public string? Role { get; set; }
+
+    [Column("phone")]
+    public string? Phone { get; set; }
+
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
 

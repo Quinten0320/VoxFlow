@@ -39,8 +39,8 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
 
         var url = $"{_settings.BaseUrl}/v1/listen"
             + $"?encoding=mulaw&sample_rate=8000"
-            + $"&model={_settings.Model}&language={language}"
-            + $"&endpointing=300&smart_format=true&interim_results=true";
+            + $"&model=nova-3&language={language}"
+            + $"&endpointing=300&smart_format=true&interim_results=true&vad_events=true";
 
         await _ws.ConnectAsync(new Uri(url), ct);
         // Receive loop runs independently; use CancellationToken.None so it drains on dispose
@@ -128,8 +128,6 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
                     _transcriptAccumulator.Append(transcript);
                 }
 
-                // speech_final=true means the endpointing fired — end of the full utterance.
-                // With interim_results=true, is_final fires for every chunk; only speech_final marks the real end.
                 var speechFinal = root?["speech_final"]?.GetValue<bool>() ?? false;
                 if (!speechFinal) return;
 
@@ -143,7 +141,7 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
             else if (type == "SpeechStarted")
             {
                 _speechStarted.Writer.TryWrite(true);
-                _logger.LogDebug("Deepgram speech_started");
+                _logger.LogInformation("Deepgram SpeechStarted received");
             }
         }
         catch (Exception ex)

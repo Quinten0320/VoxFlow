@@ -18,6 +18,10 @@ public static class TwilioStreamEndpoint
     {
         if (!context.WebSockets.IsWebSocketRequest)
         {
+            // Twilio Media Streams sends a WebSocket upgrade to /ws/twilio.
+            // If this fires, something is sending a plain HTTP request here instead.
+            var fallbackLogger = context.RequestServices.GetRequiredService<ILogger<CallStreamHandler>>();
+            fallbackLogger.LogWarning("Non-WebSocket request to /ws/twilio — returning 400");
             context.Response.StatusCode = 400;
             return;
         }
@@ -27,6 +31,7 @@ public static class TwilioStreamEndpoint
         await using var scope = context.RequestServices.CreateAsyncScope();
         var sp = scope.ServiceProvider;
         var logger = sp.GetRequiredService<ILogger<CallStreamHandler>>();
+        logger.LogInformation("WebSocket accepted for /ws/twilio");
 
         try
         {
@@ -57,7 +62,7 @@ public static class TwilioStreamEndpoint
             var callerNumber = customParams?["callerNumber"]?.GetValue<string>() ?? "";
             var noAnswer     = customParams?["noAnswer"]?.GetValue<string>() == "1";
 
-            logger.LogDebug("Stream start: callSid={CallSid} calledNumber={CalledNumber} noAnswer={NoAnswer}",
+            logger.LogInformation("Stream start: callSid={CallSid} calledNumber={CalledNumber} noAnswer={NoAnswer}",
                 callSid, calledNumber, noAnswer);
 
             if (string.IsNullOrEmpty(callSid))

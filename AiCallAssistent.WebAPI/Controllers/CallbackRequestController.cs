@@ -20,18 +20,33 @@ public class CallbackRequestController(AppDbContext db) : DashboardControllerBas
         if (status is { Length: > 0 })
             query = query.Where(c => c.Status == status);
 
-        var items = await query
+        var raw = await query
             .OrderByDescending(c => c.CreatedAt)
-            .Select(c => new CallbackRequestDto(
-                c.CallbackRequestId,
-                c.CallerNumber,
-                c.CallerName,
-                c.Reason,
-                c.ScheduledFrom,
-                c.ScheduledUntil,
-                c.Status,
-                c.CreatedAt))
+            .Select(c => new
+            {
+                c.CallbackRequestId, c.CallerNumber, c.CallerName,
+                c.Reason, c.ScheduledFrom, c.ScheduledUntil, c.Status, c.CreatedAt
+            })
             .ToListAsync();
+
+        // Detect duplicates: same caller number within 30 minutes of another entry
+        var items = raw.Select(c =>
+        {
+            var lowerReason = c.Reason.ToLowerInvariant();
+            var priority = (lowerReason.Contains("spoed") || lowerReason.Contains("snel"))
+                ? "Hoog"
+                : "Normaal";
+
+            var possibleDuplicate = raw.Any(o =>
+                o.CallbackRequestId != c.CallbackRequestId &&
+                o.CallerNumber == c.CallerNumber &&
+                Math.Abs((o.CreatedAt - c.CreatedAt).TotalMinutes) <= 30);
+
+            return new CallbackRequestDto(
+                c.CallbackRequestId, c.CallerNumber, c.CallerName,
+                c.Reason, c.ScheduledFrom, c.ScheduledUntil, c.Status, c.CreatedAt,
+                priority, possibleDuplicate);
+        }).ToList();
 
         return Ok(items);
     }

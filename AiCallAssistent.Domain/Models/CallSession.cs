@@ -36,4 +36,16 @@ public class CallSession
 
     [Column("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
+
+    [Column("call_type")]
+    public string? CallType { get; set; }
+
+    [Column("transcript")]
+    public string? Transcript { get; set; }
+
+    [Column("caller_name")]
+    public string? CallerName { get; set; }
+
+    [Column("duration_seconds")]
+    public int? DurationSeconds { get; set; }
 }

@@ -20,7 +20,16 @@ public record CallSetupData(
     int? ActiveProfileId,
     IReadOnlyDictionary<string, string>? DepartmentPhones = null,
     string? SystemPrompt = null,
-    string? WhatsAppFromNumber = null);
+    string? WhatsAppFromNumber = null,
+    string? AssistantName = null,
+    string? Tone = null,
+    bool AutoTimeGreeting = false,
+    bool UseCallerName = false,
+    string[]? TopicsYes = null,
+    string[]? TopicsNo = null,
+    string? FallbackBehavior = null,
+    string? BehaviorInstructions = null,
+    string? RoutingRulesJson = null);
 
 /// <summary>All data required to process a recording turn — loaded once at the top of Recording().</summary>
 public record CallRecordingContext(

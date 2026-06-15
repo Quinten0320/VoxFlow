@@ -81,10 +81,14 @@ public record CallSessionDto(
     string CallSid,
     string PhoneNumber,
     string CallerNumber,
+    string? CallerName,
     DateTimeOffset StartedAt,
     DateTimeOffset? EndedAt,
+    int? DurationSeconds,
     string Status,
+    string? CallType,
     string? Summary,
+    string? Transcript,
     string? CallerClassification,
     DateTimeOffset CreatedAt);
 
@@ -154,7 +158,18 @@ public record AssistantSettingsDto(
     string? AfterHoursMode,
     string CallMode,
     bool BotActiveHoursEnabled,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    string? Tone,
+    string? RoutingRules,
+    string? AutoMessageConfig,
+    string? NotificationConfig,
+    string? AssistantName,
+    bool AutoTimeGreeting,
+    bool UseCallerName,
+    string? TopicsYes,
+    string? TopicsNo,
+    string? FallbackBehavior,
+    string? BehaviorInstructions);
 
 public record UpdateAssistantSettingsRequest(
     long? VoiceId,
@@ -164,7 +179,20 @@ public record UpdateAssistantSettingsRequest(
     bool AppointmentsAutomaticallyToCalendar,
     string? AfterHoursMode,
     string CallMode = "first_line",
-    bool BotActiveHoursEnabled = false);
+    bool BotActiveHoursEnabled = false,
+    string? Tone = null,
+    string? RoutingRules = null,
+    string? AutoMessageConfig = null,
+    string? NotificationConfig = null,
+    string? AssistantName = null,
+    bool AutoTimeGreeting = false,
+    bool UseCallerName = false,
+    string? TopicsYes = null,
+    string? TopicsNo = null,
+    string? FallbackBehavior = null,
+    string? BehaviorInstructions = null);
+
+public record WhatsAppConnectRequest(string PhoneNumber);
 
 public record PhoneNumberDto(
     long PhoneNumberId,
@@ -217,7 +245,9 @@ public record CallbackRequestDto(
     DateTimeOffset ScheduledFrom,
     DateTimeOffset ScheduledUntil,
     string Status,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string Priority,
+    bool PossibleDuplicate);
 
 public record UpdateCallbackStatusRequest(string Status);
 
@@ -294,3 +324,82 @@ public record UpsertBotActiveHourRequest(
     string OpenTime,
     string CloseTime,
     int? ProfileId = null);
+
+// ── Knowledge Suggestions ────────────────────────────────────────────────────
+
+public record KnowledgeSuggestionDto(
+    long Id,
+    string Text,
+    string Status,
+    DateTimeOffset CreatedAt);
+
+public record UpdateKnowledgeSuggestionRequest(string Status);
+
+// ── Reporting ────────────────────────────────────────────────────────────────
+
+public record ReportingDto(
+    IReadOnlyList<DayCallCountDto>   CallsPerDay,
+    IReadOnlyList<CallTypeCountDto>  CallTypeDistribution,
+    IReadOnlyList<PeakHeatmapDayDto> PeakHeatmap,
+    int? AvgDurationSec,
+    int  FirstCallResolutionPct,
+    int  CallbackOpen,
+    int  CallbackHandled);
+
+public record DayCallCountDto(string Day, int Aantal);
+public record CallTypeCountDto(string Name, int Value);
+public record PeakHeatmapDayDto(string Day, IReadOnlyList<PeakHeatmapCellDto> Cells);
+public record PeakHeatmapCellDto(int Hour, int Value);
+
+// ── Onboarding ───────────────────────────────────────────────────────────────
+
+public record CompleteOnboardingRequest(
+    string CompanyName,
+    string? Branch,
+    string? AssistantName,
+    string? VoiceKey,
+    string? Prompt,
+    string? GreetingsMessage,
+    string? Tone,
+    string? WaitTime,
+    string? CallMode,
+    string? AfterHoursMode,
+    string? EscalationNumber,
+    IReadOnlyList<string>?                      ForwardNumbers,
+    string? RoutingRules,
+    string? AutoMessageConfig,
+    string? NotificationConfig,
+    IReadOnlyList<OnboardingOpeningHourRequest>  OpeningHours,
+    IReadOnlyList<OnboardingHolidayRequest>?     Holidays,
+    IReadOnlyList<OnboardingEmployeeRequest>?    Employees,
+    IReadOnlyList<OnboardingBlacklistRequest>?   Blacklist);
+
+public record OnboardingOpeningHourRequest(
+    short DayOfWeek,
+    bool IsActive,
+    string? StartTime,
+    string? EndTime);
+
+public record OnboardingHolidayRequest(
+    string    Label,
+    DateOnly? Start,
+    DateOnly? End,
+    bool      IsClosed = true);
+
+public record OnboardingEmployeeRequest(
+    string  Name,
+    string? Role,
+    string? Phone);
+
+public record OnboardingBlacklistRequest(
+    string  PhoneNumber,
+    string? Reason);
+
+// ── Invoices (stub) ──────────────────────────────────────────────────────────
+
+public record InvoiceDto(
+    string Id,
+    string Date,
+    decimal Amount,
+    string Status,
+    string PdfUrl);

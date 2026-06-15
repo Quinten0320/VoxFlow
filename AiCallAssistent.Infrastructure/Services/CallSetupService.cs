@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.Constants;
 using AiCallAssistent.Application.DTOs;
+using AiCallAssistent.Application.Helpers;
 using AiCallAssistent.Application.Services;
 using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
@@ -88,6 +89,16 @@ public class CallSetupService(
                             : assistantSettings?.Prompt is { Length: > 0 } p2 ? p2
                             : null;
 
+        var assistantName        = assistantSettings?.AssistantName;
+        var tone                 = assistantSettings?.Tone;
+        var autoTimeGreeting     = assistantSettings?.AutoTimeGreeting ?? false;
+        var useCallerName        = assistantSettings?.UseCallerName ?? false;
+        var topicsYes            = TryParseStringArray(assistantSettings?.TopicsYes);
+        var topicsNo             = TryParseStringArray(assistantSettings?.TopicsNo);
+        var fallbackBehavior     = assistantSettings?.FallbackBehavior;
+        var behaviorInstructions = assistantSettings?.BehaviorInstructions;
+        var routingRulesJson     = assistantSettings?.RoutingRules;
+
         bool isAfterHours = false;
         if (features.AfterHoursMode && afterHoursMode is { Length: > 0 })
         {
@@ -95,12 +106,12 @@ public class CallSetupService(
             catch (Exception ex) { logger.LogWarning(ex, "After-hours check failed for company {CompanyId}", companyId); }
         }
 
-        // Build the welcome text using profile greeting if available.
+        // Always use AssistantSettings greeting — no profile-level override since there is no UI to set one.
         var effectiveSettings = assistantSettings;
-        var greetingOverride  = activeProfile?.GreetingMessage;
+        string? greetingOverride  = null;
         var welcomeText = await BuildWelcomeTextAsync(
             companyId, isAfterHours, afterHoursMode, escalationNumber,
-            effectiveSettings, greetingOverride);
+            effectiveSettings, greetingOverride, autoTimeGreeting);
 
         string? branch = null;
         try
@@ -157,7 +168,16 @@ public class CallSetupService(
             afterHoursMode, isAfterHours, welcomeText, branch,
             appointmentTypesNode, departmentsNode,
             callMode, botActiveHours, activeProfileId, departmentPhones, systemPrompt,
-            WhatsAppFromNumber: assistantSettings?.WhatsAppPhoneNumber);
+            WhatsAppFromNumber:    assistantSettings?.WhatsAppPhoneNumber,
+            AssistantName:         assistantName,
+            Tone:                  tone,
+            AutoTimeGreeting:      autoTimeGreeting,
+            UseCallerName:         useCallerName,
+            TopicsYes:             topicsYes,
+            TopicsNo:              topicsNo,
+            FallbackBehavior:      fallbackBehavior,
+            BehaviorInstructions:  behaviorInstructions,
+            RoutingRulesJson:      routingRulesJson);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)
@@ -244,7 +264,7 @@ public class CallSetupService(
     private async Task<string> BuildWelcomeTextAsync(
         short companyId, bool isAfterHours, string? afterHoursMode,
         string? escalationNumber, Domain.Models.AssistantSettings? assistantSettings,
-        string? greetingOverride = null)
+        string? greetingOverride = null, bool autoTimeGreeting = false)
     {
         if (isAfterHours)
         {
@@ -260,10 +280,10 @@ public class CallSetupService(
 
         // Profile greeting takes precedence over base assistant settings greeting.
         if (greetingOverride is { Length: > 0 })
-            return greetingOverride;
+            return autoTimeGreeting ? PrependTimeGreeting(greetingOverride) : greetingOverride;
 
         if (assistantSettings?.GreetingsMessage is { Length: > 0 } greeting)
-            return greeting;
+            return autoTimeGreeting ? PrependTimeGreeting(greeting) : greeting;
 
         var companyName = "ons bedrijf";
         try
@@ -280,6 +300,26 @@ public class CallSetupService(
             logger.LogWarning(ex, "Could not load company name for company {CompanyId}", companyId);
         }
 
-        return _assistant.WelcomeMessage.Replace("{company}", companyName);
+        var fallback = _assistant.WelcomeMessage.Replace("{company}", companyName);
+        return autoTimeGreeting ? PrependTimeGreeting(fallback) : fallback;
+    }
+
+    private static string PrependTimeGreeting(string text)
+    {
+        var hour = NlTimeZone.Now.Hour;
+        var prefix = hour < 12 ? "Goedemorgen" : hour < 18 ? "Goedemiddag" : "Goedeavond";
+        // Avoid doubling if the greeting already starts with a time greeting
+        if (text.StartsWith("Goedemorgen", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("Goedemiddag",  StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("Goedeavond",   StringComparison.OrdinalIgnoreCase))
+            return text;
+        return $"{prefix}! {text}";
+    }
+
+    private static string[]? TryParseStringArray(string? json)
+    {
+        if (json is not { Length: > 0 }) return null;
+        try { return System.Text.Json.JsonSerializer.Deserialize<string[]>(json); }
+        catch { return null; }
     }
 }

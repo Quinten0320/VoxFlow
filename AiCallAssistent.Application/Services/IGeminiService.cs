@@ -25,4 +25,10 @@ public interface IGeminiService
     /// Never throws — returns "overig" on any failure.
     /// </summary>
     Task<string> ClassifyCallerAsync(string conversationId);
+
+    /// <summary>
+    /// Generates 0–3 Dutch knowledge-base improvement suggestions from a call summary.
+    /// Never throws — returns an empty list on any failure.
+    /// </summary>
+    Task<IReadOnlyList<string>> GenerateKnowledgeSuggestionsAsync(string summary, CancellationToken ct = default);
 }

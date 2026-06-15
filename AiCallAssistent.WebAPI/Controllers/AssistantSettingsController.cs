@@ -27,7 +27,18 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
                 s.AfterHoursMode,
                 s.CallMode,
                 s.BotActiveHoursEnabled,
-                s.UpdatedAt))
+                s.UpdatedAt,
+                s.Tone,
+                s.RoutingRules,
+                s.AutoMessageConfig,
+                s.NotificationConfig,
+                s.AssistantName,
+                s.AutoTimeGreeting,
+                s.UseCallerName,
+                s.TopicsYes,
+                s.TopicsNo,
+                s.FallbackBehavior,
+                s.BehaviorInstructions))
             .FirstOrDefaultAsync();
 
         if (settings == null)
@@ -59,6 +70,17 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.AfterHoursMode = request.AfterHoursMode;
         settings.CallMode = request.CallMode;
         settings.BotActiveHoursEnabled = request.BotActiveHoursEnabled;
+        settings.Tone = request.Tone;
+        settings.RoutingRules = request.RoutingRules;
+        settings.AutoMessageConfig = request.AutoMessageConfig;
+        settings.NotificationConfig = request.NotificationConfig;
+        settings.AssistantName        = request.AssistantName;
+        settings.AutoTimeGreeting     = request.AutoTimeGreeting;
+        settings.UseCallerName        = request.UseCallerName;
+        settings.TopicsYes            = request.TopicsYes;
+        settings.TopicsNo             = request.TopicsNo;
+        settings.FallbackBehavior     = request.FallbackBehavior;
+        settings.BehaviorInstructions = request.BehaviorInstructions;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();

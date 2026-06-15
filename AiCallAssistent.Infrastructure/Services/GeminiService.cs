@@ -103,7 +103,7 @@ public class GeminiService : IGeminiService
 
                 try
                 {
-                    var result = await _dispatcher.DispatchAsync(context, funcName, funcArgs);
+                    var result = await _dispatcher.DispatchAsync(context, funcName, funcArgs, _conversations, conversationId);
                     log.Result = result;
                     log.Success = true;
                     contents.Add(GeminiRequestBuilder.FunctionResponseTurn(funcName, new JsonObject { ["result"] = JsonSerializer.SerializeToNode(result) }));
@@ -195,6 +195,21 @@ public class GeminiService : IGeminiService
             if (textContents.Count == 0)
             {
                 _logger.LogWarning("SummarizeConversation: no text turns for {ConversationId}", conversationId);
+                return string.Empty;
+            }
+
+            // textContents starts at the bot's welcome message (first model turn).
+            // If there is no user turn after it, no real conversation happened — the caller
+            // hung up before speaking. Skip summarization to avoid Gemini hallucinating.
+            var hasRealUserTurn = textContents
+                .OfType<JsonObject>()
+                .Skip(1) // skip the welcome message
+                .Any(t => t["role"]?.GetValue<string>() == "user");
+
+            if (!hasRealUserTurn)
+            {
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("SummarizeConversation: no caller speech for {ConversationId} — skipping", conversationId);
                 return string.Empty;
             }
 
@@ -390,6 +405,74 @@ public class GeminiService : IGeminiService
         writer.WritePropertyName("contents");
         writer.WriteRawValue(contentsJson);
 
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> GenerateKnowledgeSuggestionsAsync(string summary, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(summary)) return [];
+
+            var requestBytes = BuildKnowledgeSuggestionsRequestBytes(summary);
+            var token = await _tokenProvider.GetAccessTokenAsync(ct);
+            var url = $"{EndpointBase}/{_settings.Model}:generateContent";
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = new ByteArrayContent(requestBytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var httpResponse = await _http.SendAsync(request, ct);
+            if (!httpResponse.IsSuccessStatusCode) return [];
+
+            var responseJson = await httpResponse.Content.ReadAsStringAsync(ct);
+            var root = JsonNode.Parse(responseJson);
+            var raw = ExtractText(root) ?? string.Empty;
+
+            raw = raw.Trim();
+            var startIdx = raw.IndexOf('[');
+            var endIdx = raw.LastIndexOf(']');
+            if (startIdx < 0 || endIdx <= startIdx) return [];
+
+            var jsonArray = JsonNode.Parse(raw[startIdx..(endIdx + 1)])?.AsArray();
+            if (jsonArray is null) return [];
+
+            return [..jsonArray
+                .Select(n => n?.GetValue<string>())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Cast<string>()];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GenerateKnowledgeSuggestionsAsync failed");
+            return [];
+        }
+    }
+
+    private static byte[] BuildKnowledgeSuggestionsRequestBytes(string summary)
+    {
+        var buffer = new ArrayBufferWriter<byte>(initialCapacity: 2048);
+        using var writer = new Utf8JsonWriter(buffer);
+
+        writer.WriteStartObject();
+        writer.WritePropertyName("contents");
+        writer.WriteStartArray();
+        writer.WriteStartObject();
+        writer.WriteString("role", "user");
+        writer.WritePropertyName("parts");
+        writer.WriteStartArray();
+        writer.WriteStartObject();
+        writer.WriteString("text",
+            $"Gegeven deze Nederlandse gespreksamenvatting, stel 0 tot 3 korte verbeteringen voor die een bedrijf aan hun kennisbank kan toevoegen zodat de AI-assistent soortgelijke vragen beter kan beantwoorden. " +
+            $"Geef het resultaat als een JSON-array van eenvoudige Nederlandse strings. Als er niets ontbreekt, geef dan []. Samenvatting: {summary}");
+        writer.WriteEndObject();
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        writer.WriteEndArray();
         writer.WriteEndObject();
         writer.Flush();
 

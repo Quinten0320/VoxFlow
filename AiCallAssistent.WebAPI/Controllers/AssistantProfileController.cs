@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AiCallAssistent.WebAPI.Controllers;
 
-[Route("api/companies/{companyId:short}/profiles")]
+[Route("api/companies/{companyId:int}/profiles")]
 public class AssistantProfileController(AppDbContext db) : DashboardControllerBase(db)
 {
     [HttpGet]

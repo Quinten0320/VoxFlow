@@ -6,6 +6,8 @@ public class TimeSlotResponse
     public string EmployeeName { get; set; } = string.Empty;
     public DateTimeOffset StartTime { get; set; }
     public DateTimeOffset EndTime { get; set; }
+    /// <summary>Spoken Dutch time to use verbally, e.g. "om kwart over 2 's middags".</summary>
+    public string SpokenTime { get; set; } = string.Empty;
 }
 
 public class AvailabilityResponse

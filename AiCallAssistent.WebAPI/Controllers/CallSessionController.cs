@@ -16,7 +16,8 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
     public async Task<IActionResult> GetAll(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] string? classification = null)
+        [FromQuery] string? classification = null,
+        [FromQuery] string? type = null)
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
@@ -30,6 +31,9 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
         if (classification is { Length: > 0 })
             baseQuery = baseQuery.Where(s => s.CallerClassification == classification);
 
+        if (type is { Length: > 0 })
+            baseQuery = baseQuery.Where(s => s.CallType == type);
+
         var totalCount = await baseQuery.CountAsync();
 
         var items = await baseQuery
@@ -40,10 +44,14 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
                 s.CallSid,
                 s.PhoneNumber,
                 s.CallerNumber,
+                s.CallerName,
                 s.StartedAt,
                 s.EndedAt,
+                s.DurationSeconds,
                 s.Status,
+                s.CallType,
                 s.Summary,
+                s.Transcript,
                 s.CallerClassification,
                 s.CreatedAt))
             .ToListAsync();
@@ -64,10 +72,14 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
                 s.CallSid,
                 s.PhoneNumber,
                 s.CallerNumber,
+                s.CallerName,
                 s.StartedAt,
                 s.EndedAt,
+                s.DurationSeconds,
                 s.Status,
+                s.CallType,
                 s.Summary,
+                s.Transcript,
                 s.CallerClassification,
                 s.CreatedAt))
             .FirstOrDefaultAsync();

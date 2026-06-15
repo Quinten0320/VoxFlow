@@ -80,12 +80,19 @@ public sealed class CallStreamHandler
             setup.Features);
 
         _callConfig = new CompanyCallConfig(
-            SystemPrompt: setup.SystemPrompt,
-            Language: setup.Language,
-            GreetingMessage: null,
-            AfterHoursMode: setup.IsAfterHours && setup.AfterHoursMode is { Length: > 0 }
-                ? setup.AfterHoursMode
-                : null);
+            SystemPrompt:         setup.SystemPrompt,
+            Language:             setup.Language,
+            GreetingMessage:      null,
+            AfterHoursMode:       setup.IsAfterHours && setup.AfterHoursMode is { Length: > 0 } ? setup.AfterHoursMode : null,
+            AssistantName:        setup.AssistantName,
+            Tone:                 setup.Tone,
+            AutoTimeGreeting:     setup.AutoTimeGreeting,
+            UseCallerName:        setup.UseCallerName,
+            TopicsYes:            setup.TopicsYes,
+            TopicsNo:             setup.TopicsNo,
+            FallbackBehavior:     setup.FallbackBehavior,
+            BehaviorInstructions: setup.BehaviorInstructions,
+            RoutingRulesJson:     setup.RoutingRulesJson);
     }
 
     // ── Entry point ──────────────────────────────────────────────────────────
@@ -217,12 +224,16 @@ public sealed class CallStreamHandler
         {
             await foreach (var _ in _deepgram.SpeechStartedEvents.ReadAllAsync(ct))
             {
-                if (!_isBotSpeaking) continue;
+                if (!_isBotSpeaking)
+                {
+                    _logger.LogInformation("SpeechStarted received but bot not speaking — ignoring for {CallSid}", _callSid);
+                    continue;
+                }
 
                 _isBotSpeaking = false;
                 _bargeIn.Writer.TryWrite(true);
                 await SendClearToTwilioAsync(ct);
-                _logger.LogDebug("Barge-in for {CallSid}", _callSid);
+                _logger.LogInformation("Barge-in triggered for {CallSid}", _callSid);
             }
         }
         catch (OperationCanceledException) { }
@@ -248,6 +259,11 @@ public sealed class CallStreamHandler
                     continue;
                 }
 
+                // Drain any stale barge-in that arrived while Gemini was processing (~1-2s).
+                // Without this, a SpeechStarted for the caller's own utterance can land in
+                // _bargeIn right as we set _isBotSpeaking = true, causing the first audio chunk
+                // to trigger an immediate "interrupted" and produce complete silence.
+                _bargeIn.Reader.TryRead(out _);
                 _isBotSpeaking = true;
                 var interrupted = await StreamResponseAsync(result, ct);
                 _isBotSpeaking = false;
@@ -256,8 +272,12 @@ public sealed class CallStreamHandler
                 {
                     // Bot finished speaking naturally — discard transcripts that piled up
                     // while we were processing (e.g. impatient "hallo?" from the caller).
-                    // Don't drain on barge-in: that transcript is the intentional follow-up.
-                    _deepgram.DrainPendingTranscripts();
+                    // Exception: if a barge-in fired right as the last audio chunk was sent
+                    // (race condition — bot audio was still in Twilio's buffer when the user spoke),
+                    // the barge-in signal is unread in _bargeIn. Consume it and skip the drain
+                    // so that the user's transcript is kept.
+                    if (!_bargeIn.Reader.TryRead(out _))
+                        _deepgram.DrainPendingTranscripts();
                 }
 
                 if (result.AutoTransferNumber is { Length: > 0 } autoTransfer)
@@ -309,16 +329,40 @@ public sealed class CallStreamHandler
         return interrupted;
     }
 
+    // 20 ms of mulaw audio at 8 kHz = 160 bytes. Sending in these sub-chunks lets us
+    // check for barge-in every 20 ms rather than waiting for the next ElevenLabs packet.
+    private const int SubChunkBytes = 160;
+
     private async Task<bool> StreamSentenceAsync(string sentence, CancellationToken ct)
     {
         _logger.LogDebug("Streaming sentence for {CallSid}: {Preview}",
             _callSid, sentence.Length > 60 ? sentence[..60] + "…" : sentence);
 
+        var elChunks = 0;
         await foreach (var chunk in _elevenlabs.StreamAsync(sentence, ct))
         {
-            if (_bargeIn.Reader.TryRead(out _)) return true; // interrupted
-            await SendAudioToTwilioAsync(chunk, ct);
+            elChunks++;
+            var mem = chunk.AsMemory();
+            var offset = 0;
+
+            while (offset < mem.Length)
+            {
+                if (_bargeIn.Reader.TryRead(out _))
+                {
+                    _logger.LogInformation("Barge-in mid-audio for {CallSid} (EL chunk {Chunk}, byte {Offset}/{Total})",
+                        _callSid, elChunks, offset, mem.Length);
+                    return true;
+                }
+
+                var size = Math.Min(SubChunkBytes, mem.Length - offset);
+                await SendAudioToTwilioAsync(mem.Slice(offset, size), ct);
+                offset += size;
+            }
         }
+
+        if (elChunks == 0)
+            _logger.LogWarning("ElevenLabs returned 0 audio chunks for {CallSid} — possible API error or silent fail",
+                _callSid);
 
         return false;
     }
@@ -345,9 +389,9 @@ public sealed class CallStreamHandler
 
     // ── Twilio WS send helpers ───────────────────────────────────────────────
 
-    private Task SendAudioToTwilioAsync(byte[] mulawChunk, CancellationToken ct) =>
+    private Task SendAudioToTwilioAsync(ReadOnlyMemory<byte> mulawChunk, CancellationToken ct) =>
         SendWsTextAsync(
-            $"{{\"event\":\"media\",\"streamSid\":\"{_streamSid}\",\"media\":{{\"payload\":\"{Convert.ToBase64String(mulawChunk)}\"}}}}",
+            $"{{\"event\":\"media\",\"streamSid\":\"{_streamSid}\",\"media\":{{\"payload\":\"{Convert.ToBase64String(mulawChunk.Span)}\"}}}}",
             ct);
 
     private Task SendClearToTwilioAsync(CancellationToken ct) =>
@@ -377,7 +421,7 @@ public sealed class CallStreamHandler
         try
         {
             await foreach (var chunk in _elevenlabs.StreamAsync(_setup.WelcomeText, ct))
-                await SendAudioToTwilioAsync(chunk, ct);
+                await SendAudioToTwilioAsync(chunk.AsMemory(), ct);
         }
         catch (Exception ex)
         {
@@ -400,7 +444,7 @@ public sealed class CallStreamHandler
             await foreach (var chunk in _elevenlabs.StreamAsync(errorText, ct))
             {
                 if (_bargeIn.Reader.TryRead(out _)) break;
-                await SendAudioToTwilioAsync(chunk, ct);
+                await SendAudioToTwilioAsync(chunk.AsMemory(), ct);
             }
         }
         catch (Exception ex)

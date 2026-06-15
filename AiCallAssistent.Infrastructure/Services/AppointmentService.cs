@@ -50,7 +50,7 @@ public class AppointmentService : IAppointmentService
     {
         var typeConfig = await _db.AppointmentTypes
             .FirstOrDefaultAsync(t => t.CompanyId == request.CompanyId && t.Name == request.Type && t.IsActive)
-            ?? throw new ArgumentException($"Appointment type '{request.Type}' is not available for this company.");
+            ?? throw new ArgumentException($"Afspraaktype '{request.Type}' is niet beschikbaar. Roep get_appointment_types aan om de beschikbare typen op te halen.");
 
         var startNl = NlTimeZone.ConvertFromUtc(request.StartTime);
         var dateNl = DateOnly.FromDateTime(startNl.DateTime);
@@ -61,18 +61,20 @@ public class AppointmentService : IAppointmentService
             var earliestNl = DateOnly.FromDateTime(NlTimeZone.Now.DateTime).AddDays(typeConfig.WaitTime);
             if (dateNl < earliestNl)
                 throw new ArgumentException(
-                    $"'{typeConfig.DisplayName}' requires at least {typeConfig.WaitTime} day(s) notice. Earliest available date: {earliestNl:yyyy-MM-dd}.");
+                    $"'{typeConfig.DisplayName}' vereist minimaal {typeConfig.WaitTime} dag(en) van tevoren boeken. Vroegst beschikbare datum: {earliestNl:yyyy-MM-dd}.");
         }
 
         var ranges = await _openingHours.GetOpeningRangesForDateAsync(request.CompanyId, dateNl);
         if (ranges.Count == 0)
-            throw new ArgumentException("The company is closed on the selected day.");
+            throw new ArgumentException(
+                $"Het bedrijf is gesloten op {dateNl:dddd d MMMM}. Roep check_availability aan voor een andere datum om beschikbare tijdsloten te vinden.");
 
         var endTime = request.StartTime.AddMinutes(typeConfig.DurationMinutes);
         var endTimeNl = TimeOnly.FromDateTime(NlTimeZone.ConvertFromUtc(endTime).DateTime);
 
         if (!ranges.Any(r => timeNl >= r.Start && endTimeNl <= r.End))
-            throw new ArgumentException("Appointment time is outside opening hours.");
+            throw new ArgumentException(
+                $"Het tijdstip {timeNl:HH:mm} valt buiten de openingstijden op {dateNl:dddd d MMMM}. Roep check_availability aan voor {dateNl:yyyy-MM-dd} om te zien welke tijdsloten wél beschikbaar zijn.");
 
         var startUtc = request.StartTime.ToUniversalTime();
         var endUtc = endTime.ToUniversalTime();
@@ -102,7 +104,7 @@ public class AppointmentService : IAppointmentService
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException pg && pg.SqlState == PostgresErrorCodes.UniqueViolation)
         {
-            throw new InvalidOperationException("The selected time slot is already booked for this employee.", ex);
+            throw new InvalidOperationException("Dit tijdstip is al bezet voor deze medewerker. Roep check_availability aan om andere beschikbare tijdsloten te vinden.", ex);
         }
 
         var employeeName = await _db.Employees
@@ -156,14 +158,20 @@ public class AppointmentService : IAppointmentService
         };
     }
 
-    public async Task<AvailabilityResponse> GetAvailabilityAsync(short companyId, string type, DateOnly date)
+    public async Task<AvailabilityResponse> GetAvailabilityAsync(short companyId, string type, DateOnly date,
+        string? fromTime = null, string? untilTime = null)
     {
+        _logger.LogInformation("GetAvailability: company={CompanyId} type={Type} date={Date} from={From} until={Until}",
+            companyId, type, date, fromTime ?? "–", untilTime ?? "–");
+
         var typeConfig = await _db.AppointmentTypes
             .FirstOrDefaultAsync(t => t.CompanyId == companyId && t.Name == type && t.IsActive)
-            ?? throw new ArgumentException($"Appointment type '{type}' is not available for this company.");
+            ?? throw new ArgumentException($"Afspraaktype '{type}' is niet beschikbaar. Roep get_appointment_types aan voor de juiste naam.");
 
         var ranges = await _openingHours.GetOpeningRangesForDateAsync(companyId, date);
         if (ranges.Count == 0)
+        {
+            _logger.LogWarning("GetAvailability: 0 opening ranges for company={CompanyId} date={Date} — returning empty", companyId, date);
             return new AvailabilityResponse
             {
                 CompanyId = companyId, Type = type,
@@ -171,9 +179,15 @@ public class AppointmentService : IAppointmentService
                 DurationMinutes = typeConfig.DurationMinutes,
                 AvailableSlots = []
             };
+        }
 
         var employees = await GetActiveEmployeesAsync(companyId);
+        _logger.LogInformation("GetAvailability: {EmployeeCount} employee(s), {RangeCount} opening range(s) for {Date}",
+            employees.Count, ranges.Count, date);
+
         var bookedSlots = await GetBookedSlotsAsync(companyId, date, ranges);
+        _logger.LogInformation("GetAvailability: {BookedCount} booked slot(s) on {Date}", bookedSlots.Count, date);
+
         var availableSlots = new List<TimeSlotResponse>();
 
         foreach (var employee in employees)
@@ -186,9 +200,23 @@ public class AppointmentService : IAppointmentService
                 EmployeeId = employee.Id,
                 EmployeeName = employee.Name,
                 StartTime = s.Start,
-                EndTime = s.End
+                EndTime = s.End,
+                SpokenTime = ToSpokenDutchTime(s.Start)
             }));
         }
+
+        var ordered = availableSlots.OrderBy(s => s.StartTime).ThenBy(s => s.EmployeeName).ToList();
+
+        if (fromTime is { Length: > 0 } && TimeOnly.TryParse(fromTime, out var fromTo))
+            ordered = ordered.Where(s => TimeOnly.FromDateTime(s.StartTime.DateTime) >= fromTo).ToList();
+        if (untilTime is { Length: > 0 } && TimeOnly.TryParse(untilTime, out var untilTo))
+            ordered = ordered.Where(s => TimeOnly.FromDateTime(s.StartTime.DateTime) < untilTo).ToList();
+
+        // Cap at 5 so the slot list stays manageable for Gemini
+        ordered = ordered.Take(5).ToList();
+
+        _logger.LogInformation("GetAvailability: returning {Count} slot(s) for {Date} (after filter/cap)",
+            ordered.Count, date);
 
         return new AvailabilityResponse
         {
@@ -196,15 +224,17 @@ public class AppointmentService : IAppointmentService
             Type = type,
             Date = date.ToString("yyyy-MM-dd"),
             DurationMinutes = typeConfig.DurationMinutes,
-            AvailableSlots = availableSlots.OrderBy(s => s.StartTime).ThenBy(s => s.EmployeeName).ToList()
+            AvailableSlots = ordered
         };
     }
 
     public async Task<SoonestAvailableResponse> GetSoonestAvailableAsync(short companyId, string type)
     {
+        _logger.LogInformation("GetSoonestAvailable: company={CompanyId} type={Type}", companyId, type);
+
         var typeConfig = await _db.AppointmentTypes
             .FirstOrDefaultAsync(t => t.CompanyId == companyId && t.Name == type && t.IsActive)
-            ?? throw new ArgumentException($"Appointment type '{type}' is not available for this company.");
+            ?? throw new ArgumentException($"Afspraaktype '{type}' is niet beschikbaar. Roep get_appointment_types aan voor de juiste naam.");
 
         var employees = await GetActiveEmployeesAsync(companyId);
         if (employees.Count == 0)
@@ -252,7 +282,8 @@ public class AppointmentService : IAppointmentService
                         EmployeeId = earliest.Value.Employee.Id,
                         EmployeeName = earliest.Value.Employee.Name,
                         StartTime = earliest.Value.Start,
-                        EndTime = earliest.Value.End
+                        EndTime = earliest.Value.End,
+                        SpokenTime = ToSpokenDutchTime(earliest.Value.Start)
                     }
                 };
             }
@@ -271,8 +302,8 @@ public class AppointmentService : IAppointmentService
     }
 
     /// <summary>
-    /// Generates available slots using range-start and booking-end times as candidates.
-    /// This correctly handles any gap left by existing bookings without a fixed grid.
+    /// Generates available slots by walking the opening range in steps of durationMinutes.
+    /// Each grid position is checked against existing bookings for conflicts.
     /// </summary>
     private static List<(DateTimeOffset Start, DateTimeOffset End)> GenerateSlots(
         DateOnly date,
@@ -284,24 +315,19 @@ public class AppointmentService : IAppointmentService
 
         foreach (var range in ranges)
         {
-            var rangeStart = NlTimeZone.ToDateTimeOffset(date, range.Start);
+            var current  = NlTimeZone.ToDateTimeOffset(date, range.Start);
             var rangeEnd = NlTimeZone.ToDateTimeOffset(date, range.End);
 
-            var candidates = new List<DateTimeOffset> { rangeStart };
-            foreach (var booked in bookedSlots)
+            while (true)
             {
-                if (booked.EndTime > rangeStart && booked.EndTime <= rangeEnd)
-                    candidates.Add(booked.EndTime);
-            }
+                var slotEnd = current.AddMinutes(durationMinutes);
+                if (slotEnd > rangeEnd) break;
 
-            foreach (var candidate in candidates.OrderBy(c => c))
-            {
-                var slotEnd = candidate.AddMinutes(durationMinutes);
-                if (slotEnd > rangeEnd) continue;
-
-                var hasConflict = bookedSlots.Any(b => b.StartTime < slotEnd && b.EndTime > candidate);
+                var hasConflict = bookedSlots.Any(b => b.StartTime < slotEnd && b.EndTime > current);
                 if (!hasConflict)
-                    slots.Add((candidate, slotEnd));
+                    slots.Add((current, slotEnd));
+
+                current = current.AddMinutes(durationMinutes);
             }
         }
 
@@ -354,6 +380,34 @@ public class AppointmentService : IAppointmentService
             .Select(e => (long?)e.EmployeeId)
             .FirstOrDefaultAsync();
 
-        return employeeId ?? throw new InvalidOperationException("No employee is available at the requested time.");
+        return employeeId ?? throw new InvalidOperationException("Er is geen medewerker beschikbaar op dit tijdstip. Roep check_availability aan om beschikbare tijdsloten te vinden.");
+    }
+
+    /// <summary>
+    /// Converts a DateTimeOffset (with NL offset embedded) to a spoken Dutch time string,
+    /// e.g. "om kwart over 2 's middags" or "om twintig voor 9 's ochtends".
+    /// </summary>
+    private static string ToSpokenDutchTime(DateTimeOffset dt)
+    {
+        var h = dt.DateTime.Hour;
+        var m = dt.DateTime.Minute;
+
+        string period  = h < 12 ? " 's ochtends" : h < 18 ? " 's middags" : " 's avonds";
+        int h12     = h > 12 ? h - 12 : h == 0 ? 12 : h;
+        int nextH12 = (h + 1) > 12 ? (h + 1) - 12 : h + 1 == 0 ? 12 : h + 1;
+
+        return m switch
+        {
+            0  => $"om {h12} uur{period}",
+            10 => $"om tien over {h12}{period}",
+            15 => $"om kwart over {h12}{period}",
+            20 => $"om twintig over {h12}{period}",
+            30 => $"om half {nextH12}{period}",
+            40 => $"om twintig voor {nextH12}{period}",
+            45 => $"om kwart voor {nextH12}{period}",
+            50 => $"om tien voor {nextH12}{period}",
+            _  when m < 30 => $"om {m} over {h12}{period}",
+            _              => $"om {60 - m} voor {nextH12}{period}"
+        };
     }
 }

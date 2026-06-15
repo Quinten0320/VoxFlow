@@ -109,25 +109,52 @@ public class DashboardStatsController(AppDbContext db) : DashboardControllerBase
             .OrderByDescending(x => x.Count)
             .ToList();
 
+        var openCallbacks = await Db.CallbackRequests
+            .CountAsync(r => r.CompanyId == companyId && r.Status == "open");
+
+        var yesterdayStartUtc = todayStartUtc.AddDays(-1);
+        var missedToday = await Db.CallSessions
+            .CountAsync(c => c.CompanyId == companyId
+                && c.StartedAt >= todayStartUtc && c.StartedAt < todayEndUtc
+                && c.Status == "no-answer");
+
+        var avgDurationRaw = await Db.CallSessions
+            .Where(c => c.CompanyId == companyId
+                && c.StartedAt >= sevenDaysAgoUtc
+                && c.DurationSeconds != null && c.DurationSeconds >= 15)
+            .Select(c => (int?)c.DurationSeconds)
+            .ToListAsync();
+        var avgDurationSec = avgDurationRaw.Count > 0
+            ? (int?)avgDurationRaw.Average(v => v!.Value)
+            : null;
+
         var recentRaw = await Db.CallSessions
             .Where(c => c.CompanyId == companyId && c.Status == "completed")
             .OrderByDescending(c => c.StartedAt)
             .Take(5)
-            .Select(c => new { c.CallSid, c.CallerNumber, c.StartedAt, c.EndedAt, c.Summary })
+            .Select(c => new
+            {
+                c.CallSid, c.CallerNumber, c.CallerName,
+                c.StartedAt, c.DurationSeconds, c.Summary, c.CallType, c.Status
+            })
             .ToListAsync();
 
         var recentCalls = recentRaw
             .Select(c => new RecentCallDto(
                 c.CallSid,
                 c.CallerNumber,
+                c.CallerName,
                 c.StartedAt,
-                c.EndedAt.HasValue ? (int)(c.EndedAt.Value - c.StartedAt).TotalSeconds : null,
-                c.Summary))
+                c.DurationSeconds,
+                c.Summary,
+                c.CallType,
+                c.Status))
             .ToList();
 
         return Ok(new DashboardStatsDto(
             GeneratedAt: nowUtc,
-            Calls: new CallStatsDto(callsToday, callsThisWeek, callsThisMonth, last7Days),
+            Calls: new CallStatsDto(callsToday, callsThisWeek, callsThisMonth, last7Days,
+                openCallbacks, missedToday, avgDurationSec),
             Appointments: new AppointmentStatsDto(
                 appointmentsToday, appointmentsThisWeek, upcomingToday, byTypeThisMonth),
             RecentCalls: recentCalls));

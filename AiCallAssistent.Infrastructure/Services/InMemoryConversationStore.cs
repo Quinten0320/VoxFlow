@@ -7,6 +7,7 @@ namespace AiCallAssistent.Infrastructure.Services;
 public sealed class InMemoryConversationStore : IConversationStore, IDisposable
 {
     private readonly ConcurrentDictionary<string, ConversationEntry> _store = new();
+    private readonly ConcurrentDictionary<string, string> _outcomes = new();
     private readonly Timer _cleanupTimer;
 
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(30);
@@ -45,6 +46,12 @@ public sealed class InMemoryConversationStore : IConversationStore, IDisposable
             initialTurns.ToJsonString(),
             DateTimeOffset.UtcNow.Add(Ttl)));
     }
+
+    public void SetCallOutcome(string conversationId, string callType) =>
+        _outcomes[conversationId] = callType;
+
+    public string? GetCallOutcome(string conversationId) =>
+        _outcomes.TryGetValue(conversationId, out var t) ? t : null;
 
     private void RemoveExpiredEntries(object? _)
     {

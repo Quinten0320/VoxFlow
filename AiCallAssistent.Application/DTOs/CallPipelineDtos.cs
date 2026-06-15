@@ -50,4 +50,13 @@ public record CompanyCallConfig(
     string Language,
     string? GreetingMessage,
     string? AfterHoursMode = null,
-    bool IsWhatsApp = false);
+    bool IsWhatsApp = false,
+    string? AssistantName = null,
+    string? Tone = null,
+    bool AutoTimeGreeting = false,
+    bool UseCallerName = false,
+    string[]? TopicsYes = null,
+    string[]? TopicsNo = null,
+    string? FallbackBehavior = null,
+    string? BehaviorInstructions = null,
+    string? RoutingRulesJson = null);

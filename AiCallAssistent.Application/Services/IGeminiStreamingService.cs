@@ -15,6 +15,7 @@ public interface IGeminiStreamingService
         string conversationId,
         CompanyCallConfig? config,
         CancellationToken ct);
+
 }
 
 public record GeminiStreamResult(

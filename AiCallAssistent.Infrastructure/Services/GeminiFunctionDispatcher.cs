@@ -41,7 +41,9 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
 
             ["check_availability"] = async (ctx, args) =>
                 await appointments.GetAvailabilityAsync(
-                    ctx.CompanyId, Arg(args, "type"), DateOnly.Parse(Arg(args, "date"))),
+                    ctx.CompanyId, Arg(args, "type"), DateOnly.Parse(Arg(args, "date")),
+                    args?["from_time"]?.GetValue<string>(),
+                    args?["until_time"]?.GetValue<string>()),
 
             ["create_appointment"] = async (ctx, args) =>
                 await CreateAppointmentAsync(ctx, args, appointments, whatsApp),
@@ -69,12 +71,32 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         };
     }
 
-    public async Task<object> DispatchAsync(CallDispatchContext context, string functionName, JsonNode? args)
+    public async Task<object> DispatchAsync(
+        CallDispatchContext context,
+        string functionName,
+        JsonNode? args,
+        IConversationStore? store = null,
+        string? conversationId = null)
     {
         if (!_handlers.TryGetValue(functionName, out var handler))
             throw new ArgumentException($"Unknown function '{functionName}'");
 
-        return await handler(context, args);
+        var result = await handler(context, args);
+
+        if (store != null && conversationId != null)
+        {
+            var outcome = functionName switch
+            {
+                "create_appointment"   => "Afspraak ingepland",
+                "schedule_callback"    => "Terugbelverzoek",
+                "transfer_to_department" or "transfer_to_human" => "Doorgeschakeld",
+                _ => null
+            };
+            if (outcome != null)
+                store.SetCallOutcome(conversationId, outcome);
+        }
+
+        return result;
     }
 
     // ── Static dispatch helpers ──────────────────────────────────────────────
@@ -207,7 +229,9 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
                 new JsonObject(), []),
 
             FunctionDeclaration("get_soonest_available",
-                "Find the soonest available appointment slot for a given type.",
+                "Find the single earliest available appointment slot across all upcoming days. " +
+                "Use this ONLY when the caller has not mentioned a preferred date or time. " +
+                "If the caller mentions a date or time window, use check_availability instead.",
                 new JsonObject
                 {
                     ["type"] = Param("string", "Appointment type name, e.g. hair_cutting_male")
@@ -215,16 +239,22 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
                 ["type"]),
 
             FunctionDeclaration("check_availability",
-                "Get all available time slots for a specific date and appointment type.",
+                "Get available time slots for a specific date and appointment type. " +
+                "Always use this when the caller mentions a specific date. " +
+                "When the caller also states a preferred time window (e.g. 'between 14:00 and 16:00'), pass from_time and until_time to narrow results. " +
+                "Returns at most 5 slots so you can present options to the caller.",
                 new JsonObject
                 {
-                    ["type"] = Param("string"),
-                    ["date"] = Param("string", "Date in YYYY-MM-DD format")
+                    ["type"]       = Param("string"),
+                    ["date"]       = Param("string", "Date in YYYY-MM-DD format"),
+                    ["from_time"]  = Param("string", "Optional: earliest slot start time in HH:MM, e.g. \"14:00\""),
+                    ["until_time"] = Param("string", "Optional: latest slot start time (exclusive) in HH:MM, e.g. \"16:00\"")
                 },
                 ["type", "date"]),
 
             FunctionDeclaration("create_appointment",
-                "Book an appointment. Always confirm the details with the caller before calling this.",
+                "Book an appointment. Always confirm the details with the caller before calling this. " +
+                "If this returns an error, read the error message — it tells you exactly what to do next (usually: call check_availability for the same date to find available slots).",
                 new JsonObject
                 {
                     ["type"]          = Param("string"),

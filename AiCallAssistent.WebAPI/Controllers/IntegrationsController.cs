@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AiCallAssistent.Application.Configuration;
+using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Application.Services;
 using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
@@ -266,5 +267,61 @@ public class IntegrationsController(
         return rows == 0
             ? NotFound(new { error = "Outlook is not connected for this company" })
             : NoContent();
+    }
+
+    // ── WhatsApp ────────────────────────────────────────────────────────────────
+
+    [HttpGet("whatsapp/status")]
+    public async Task<IActionResult> WhatsAppStatus()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var phoneNumber = await Db.AssistantSettings
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => s.WhatsAppPhoneNumber)
+            .FirstOrDefaultAsync();
+
+        return Ok(new { connected = !string.IsNullOrWhiteSpace(phoneNumber), phoneNumber });
+    }
+
+    [HttpPut("whatsapp/connect")]
+    public async Task<IActionResult> WhatsAppConnect([FromBody] WhatsAppConnectRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+            return BadRequest(new { error = "PhoneNumber is required." });
+
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+        {
+            settings = new Domain.Models.AssistantSettings { CompanyId = companyId };
+            Db.AssistantSettings.Add(settings);
+        }
+
+        settings.WhatsAppPhoneNumber = request.PhoneNumber.Trim();
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+
+        return Ok(new { connected = true, phoneNumber = settings.WhatsAppPhoneNumber });
+    }
+
+    [HttpDelete("whatsapp/disconnect")]
+    public async Task<IActionResult> WhatsAppDisconnect()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+            return NotFound(new { error = "No assistant settings found for this company." });
+
+        settings.WhatsAppPhoneNumber = null;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+
+        return NoContent();
     }
 }

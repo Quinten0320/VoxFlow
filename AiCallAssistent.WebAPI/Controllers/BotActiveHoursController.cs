@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AiCallAssistent.WebAPI.Controllers;
 
-[Route("api/companies/{companyId:short}/bot-active-hours")]
+[Route("api/companies/{companyId:int}/bot-active-hours")]
 public class BotActiveHoursController(AppDbContext db) : DashboardControllerBase(db)
 {
     [HttpGet]

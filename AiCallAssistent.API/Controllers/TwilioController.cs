@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json.Nodes;
 using AiCallAssistent.API.Filters;
 using AiCallAssistent.Application.Constants;
 using AiCallAssistent.Application.DTOs;
@@ -33,6 +35,7 @@ public class TwilioController : ControllerBase
     private readonly IWhatsAppService _whatsApp;
     private readonly TwilioSettings _twilio;
     private readonly ILogger<TwilioController> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public TwilioController(
         IElevenLabsService tts,
@@ -47,7 +50,8 @@ public class TwilioController : ControllerBase
         AppDbContext db,
         IOptions<TwilioSettings> twilioSettings,
         IWhatsAppService whatsApp,
-        ILogger<TwilioController> logger)
+        ILogger<TwilioController> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _tts = tts;
         _stt = stt;
@@ -62,6 +66,7 @@ public class TwilioController : ControllerBase
         _twilio = twilioSettings.Value;
         _whatsApp = whatsApp;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     // ── Answer ───────────────────────────────────────────────────────────────
@@ -229,14 +234,66 @@ public class TwilioController : ControllerBase
             var summary        = await _gemini.SummarizeConversationAsync(callSid);
             var classification = await _gemini.ClassifyCallerAsync(callSid);
 
+            var turns = _conversations.Load(callSid);
+            var transcript = BuildTranscript(turns);
+
+            var callType = _conversations.GetCallOutcome(callSid) ?? "Info";
+
+            var durationSec = (int)(DateTimeOffset.UtcNow - session.StartedAt).TotalSeconds;
+
+            string? callerName = null;
+            if (!string.IsNullOrWhiteSpace(session.CallerNumber))
+            {
+                callerName = await _db.CallbackRequests
+                    .Where(r => r.CompanyId == session.CompanyId && r.CallerNumber == session.CallerNumber)
+                    .OrderByDescending(r => r.CreatedAt)
+                    .Select(r => (string?)r.CallerName)
+                    .FirstOrDefaultAsync();
+            }
+
             session.EndedAt              = DateTimeOffset.UtcNow;
             session.Status               = "completed";
             session.Summary              = string.IsNullOrWhiteSpace(summary) ? null : summary;
             session.CallerClassification = classification;
+            session.CallType             = callType;
+            session.Transcript           = string.IsNullOrWhiteSpace(transcript) ? null : transcript;
+            session.CallerName           = callerName;
+            session.DurationSeconds      = durationSec;
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("Call {CallSid} completed. Classification: {Class}. Summary: {Summary}",
-                callSid, classification, session.Summary ?? "(none)");
+            _logger.LogInformation("Call {CallSid} completed. Classification: {Class}. Type: {Type}. Summary: {Summary}",
+                callSid, classification, callType, session.Summary ?? "(none)");
+
+            if (!string.IsNullOrWhiteSpace(session.Summary))
+            {
+                var summarySnapshot = session.Summary;
+                var companyId = session.CompanyId;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var suggestions = await _gemini.GenerateKnowledgeSuggestionsAsync(summarySnapshot);
+                        if (suggestions.Count > 0)
+                        {
+                            using var scope = _scopeFactory.CreateScope();
+                            var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                            foreach (var text in suggestions)
+                                scopedDb.KnowledgeSuggestions.Add(new KnowledgeSuggestion
+                                {
+                                    CompanyId = companyId,
+                                    Text = text,
+                                    Status = "new",
+                                    CreatedAt = DateTimeOffset.UtcNow
+                                });
+                            await scopedDb.SaveChangesAsync();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Knowledge suggestion generation failed for {CallSid}", callSid);
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -357,7 +414,9 @@ public class TwilioController : ControllerBase
             return await SpeakAndAfterHoursDialAsync(setup.WelcomeText, setup.EscalationNumber, noAnswerUrl, setup.Language);
         }
 
-        return TwimlResult(BuildStreamTwiml(calledNumber, callerNumber));
+        var streamTwiml = BuildStreamTwiml(calledNumber, callerNumber);
+        _logger.LogInformation("Returning Stream TwiML for {CallSid}: {TwimlPreview}", callSid, streamTwiml[..Math.Min(200, streamTwiml.Length)]);
+        return TwimlResult(streamTwiml);
     }
 
     private string BuildStreamTwiml(string calledNumber, string callerNumber, bool afterHoursNoAnswer = false)
@@ -565,9 +624,18 @@ public class TwilioController : ControllerBase
             var config = new CompanyCallConfig(
                 setup.SystemPrompt,
                 setup.Language,
-                GreetingMessage: null,
-                AfterHoursMode: null,
-                IsWhatsApp: true);
+                GreetingMessage:      null,
+                AfterHoursMode:       null,
+                IsWhatsApp:           true,
+                AssistantName:        setup.AssistantName,
+                Tone:                 setup.Tone,
+                AutoTimeGreeting:     setup.AutoTimeGreeting,
+                UseCallerName:        setup.UseCallerName,
+                TopicsYes:            setup.TopicsYes,
+                TopicsNo:             setup.TopicsNo,
+                FallbackBehavior:     setup.FallbackBehavior,
+                BehaviorInstructions: setup.BehaviorInstructions,
+                RoutingRulesJson:     setup.RoutingRulesJson);
 
             var result = await _gemini.RunConversationAsync(context, body, conversationKey, config);
 
@@ -594,6 +662,30 @@ public class TwilioController : ControllerBase
                 </Response>
                 """);
         }
+    }
+
+    private static string BuildTranscript(JsonArray turns)
+    {
+        var sb = new StringBuilder();
+        foreach (var turn in turns)
+        {
+            if (turn is not JsonObject obj) continue;
+            var role = obj["role"]?.GetValue<string>();
+            if (role is not ("user" or "model")) continue;
+
+            var parts = obj["parts"]?.AsArray();
+            if (parts is null) continue;
+
+            foreach (var part in parts)
+            {
+                if (part?["text"] is not JsonNode textNode) continue;
+                var text = textNode.GetValue<string>().Trim();
+                if (string.IsNullOrWhiteSpace(text)) continue;
+                var label = role == "model" ? "Assistent" : "Beller";
+                sb.AppendLine($"{label}: {text}");
+            }
+        }
+        return sb.ToString().Trim();
     }
 
     private static ContentResult TwimlResult(string twiml) =>
