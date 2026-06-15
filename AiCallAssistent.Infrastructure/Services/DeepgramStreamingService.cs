@@ -22,7 +22,6 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
 
     private ClientWebSocket? _ws;
     private Task? _receiveLoop;
-    private readonly StringBuilder _transcriptAccumulator = new();
 
     public ChannelReader<bool> SpeechStartedEvents => _speechStarted.Reader;
 
@@ -37,28 +36,33 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
         _ws = new ClientWebSocket();
         _ws.Options.SetRequestHeader("Authorization", $"Token {_settings.ApiKey}");
 
-        var url = $"{_settings.BaseUrl}/v1/listen"
+        // flux-general-multi supports Dutch and 9 other languages via language_hint
+        var url = $"{_settings.BaseUrl}/v2/listen"
             + $"?encoding=mulaw&sample_rate=8000"
-            + $"&model=nova-3&language={language}"
-            + $"&endpointing=300&smart_format=true&interim_results=true&vad_events=true";
+            + $"&model=flux-general-multi"
+            + $"&language_hint={language}"
+            + $"&eot_timeout_ms=500"
+            + $"&eot_threshold=0.5";
 
         await _ws.ConnectAsync(new Uri(url), ct);
-        // Receive loop runs independently; use CancellationToken.None so it drains on dispose
         _receiveLoop = Task.Run(() => ReceiveLoopAsync(ct), CancellationToken.None);
-        _logger.LogDebug("Deepgram WebSocket connected");
+        _logger.LogDebug("Deepgram Flux WebSocket connected (language_hint={Language})", language);
     }
 
     public async ValueTask SendAudioAsync(ReadOnlyMemory<byte> mulawBytes, CancellationToken ct)
     {
         if (_ws?.State != WebSocketState.Open) return;
+        // Forward each Twilio 20ms frame (160 bytes) directly to Deepgram without buffering.
+        // Keeping latency low here is critical for fast StartOfTurn (barge-in) detection.
         await _ws.SendAsync(mulawBytes, WebSocketMessageType.Binary, endOfMessage: true, ct);
     }
 
     public async Task CloseAudioAsync(CancellationToken ct)
     {
         if (_ws?.State != WebSocketState.Open) return;
-        // Empty binary frame signals end-of-stream to Deepgram
-        await _ws.SendAsync(ReadOnlyMemory<byte>.Empty, WebSocketMessageType.Binary, endOfMessage: true, ct);
+        // Flux requires a JSON CloseStream message to signal end of audio
+        var closeBytes = "{\"type\":\"CloseStream\"}"u8.ToArray();
+        await _ws.SendAsync(closeBytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, ct);
     }
 
     public IAsyncEnumerable<string> ReadTranscriptsAsync(CancellationToken ct) =>
@@ -91,16 +95,16 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
             }
 
             closed:;
-            _logger.LogDebug("Deepgram receive loop ended");
+            _logger.LogDebug("Deepgram Flux receive loop ended");
         }
         catch (OperationCanceledException) { }
         catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
         {
-            _logger.LogDebug("Deepgram WebSocket closed prematurely");
+            _logger.LogDebug("Deepgram Flux WebSocket closed prematurely");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Deepgram receive loop error");
+            _logger.LogWarning(ex, "Deepgram Flux receive loop error");
         }
         finally
         {
@@ -116,37 +120,82 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
             var root = JsonNode.Parse(json);
             var type = root?["type"]?.GetValue<string>();
 
-            if (type == "Results")
+            switch (type)
             {
-                var isFinal = root?["is_final"]?.GetValue<bool>() ?? false;
-                if (!isFinal) return;
+                case "Connected":
+                    _logger.LogDebug("Deepgram Flux connected: request_id={RequestId}",
+                        root?["request_id"]?.GetValue<string>());
+                    return;
 
-                var transcript = root?["channel"]?["alternatives"]?[0]?["transcript"]?.GetValue<string>() ?? "";
-                if (!string.IsNullOrWhiteSpace(transcript))
-                {
-                    if (_transcriptAccumulator.Length > 0) _transcriptAccumulator.Append(' ');
-                    _transcriptAccumulator.Append(transcript);
-                }
+                case "Error":
+                    _logger.LogWarning("Deepgram Flux error: code={Code} description={Desc}",
+                        root?["code"]?.GetValue<string>(),
+                        root?["description"]?.GetValue<string>());
+                    return;
 
-                var speechFinal = root?["speech_final"]?.GetValue<bool>() ?? false;
-                if (!speechFinal) return;
+                case "TurnInfo":
+                    HandleTurnInfo(root!);
+                    return;
 
-                var fullTranscript = _transcriptAccumulator.ToString().Trim();
-                _transcriptAccumulator.Clear();
-                if (string.IsNullOrWhiteSpace(fullTranscript)) return;
-
-                _transcripts.Writer.TryWrite(fullTranscript);
-                _logger.LogDebug("Deepgram utterance complete: {Transcript}", fullTranscript);
-            }
-            else if (type == "SpeechStarted")
-            {
-                _speechStarted.Writer.TryWrite(true);
-                _logger.LogInformation("Deepgram SpeechStarted received");
+                default:
+                    _logger.LogDebug("Deepgram Flux unknown message type: {Type}", type);
+                    return;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to parse Deepgram message");
+            _logger.LogWarning(ex, "Failed to parse Deepgram Flux message");
+        }
+    }
+
+    private void HandleTurnInfo(JsonNode root)
+    {
+        var eventType = root["event"]?.GetValue<string>();
+        var transcript = root["transcript"]?.GetValue<string>() ?? "";
+
+        switch (eventType)
+        {
+            case "StartOfTurn":
+                // User started speaking — trigger barge-in if bot is currently talking
+                _speechStarted.Writer.TryWrite(true);
+                _logger.LogInformation("Deepgram Flux StartOfTurn received");
+                break;
+
+            case "EndOfTurn":
+                // High-confidence end of turn — transcript is the complete utterance for this turn
+                if (!string.IsNullOrWhiteSpace(transcript))
+                {
+                    _transcripts.Writer.TryWrite(transcript.Trim());
+                    _logger.LogDebug("Deepgram Flux EndOfTurn: {Transcript}", transcript);
+                }
+                else
+                {
+                    _logger.LogDebug("Deepgram Flux EndOfTurn with empty transcript — ignoring");
+                }
+                break;
+
+            case "TurnResumed":
+                // User continued speaking after an EagerEndOfTurn — treat as barge-in
+                // to interrupt the bot if it started responding speculatively
+                _speechStarted.Writer.TryWrite(true);
+                _logger.LogInformation("Deepgram Flux TurnResumed received");
+                break;
+
+            case "EagerEndOfTurn":
+                // Medium-confidence end of turn — ignored for now; we wait for EndOfTurn
+                // to avoid processing incomplete utterances
+                _logger.LogDebug("Deepgram Flux EagerEndOfTurn (confidence={Confidence}): {Transcript}",
+                    root["end_of_turn_confidence"]?.GetValue<double>(), transcript);
+                break;
+
+            case "Update":
+                // Partial transcript update — ignored
+                _logger.LogDebug("Deepgram Flux Update: {Transcript}", transcript);
+                break;
+
+            default:
+                _logger.LogDebug("Deepgram Flux unknown TurnInfo event: {Event}", eventType);
+                break;
         }
     }
 
