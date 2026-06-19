@@ -97,7 +97,8 @@ internal static class GeminiRequestBuilder
         };
 
         var behaviorSection = BuildBehaviorSection(config, nowNl);
-        writer.WriteString("text", basePrompt + behaviorSection + afterHoursInstructions + channelRules);
+        var sentimentSection = BuildSentimentEscalationSection(context.Features);
+        writer.WriteString("text", basePrompt + behaviorSection + sentimentSection + afterHoursInstructions + channelRules);
 
         writer.WriteEndObject();
         writer.WriteEndArray();
@@ -185,6 +186,18 @@ internal static class GeminiRequestBuilder
         }
 
         return sb.ToString();
+    }
+
+    private static string BuildSentimentEscalationSection(AiCallAssistent.Application.DTOs.CompanyFeatures? features)
+    {
+        if (features?.TransferToHuman != true) return string.Empty;
+        return """
+
+            SENTIMENTDETECTIE:
+            Let op signalen van frustratie of agressie bij de beller: herhaalde klachten, verheven stem, uitspraken zoals "dit is belachelijk", "ik wil nu een medewerker", "jullie helpen me niet".
+            Als je twee of meer van deze signalen achter elkaar waarneemt, bied dan proactief aan om de beller door te verbinden: "Ik merk dat dit frustrerend is. Wilt u dat ik u doorverbind met een medewerker?"
+            Als de beller dit bevestigt, roep dan onmiddellijk transfer_to_human aan.
+            """;
     }
 
     private static string? ParseRoutingRules(string json)

@@ -12,4 +12,7 @@ public interface IAppointmentService
 
     /// <summary>Returns true if the appointment was found and deleted.</summary>
     Task<bool> CancelAppointmentAsync(long appointmentId, short companyId);
+
+    /// <summary>Moves an appointment to a new start time. Returns the updated appointment or throws on conflict/not-found.</summary>
+    Task<AppointmentResponse> RescheduleAppointmentAsync(long appointmentId, DateTimeOffset newStartTime, short companyId);
 }

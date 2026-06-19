@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Application.Services;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace AiCallAssistent.Infrastructure.Services;
@@ -24,7 +25,7 @@ public sealed class CallStreamHandler
     private readonly IGeminiStreamingService _gemini;
     private readonly IElevenLabsStreamingService _elevenlabs;
     private readonly TwilioSettings _twilio;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<CallStreamHandler> _logger;
 
     // ── Pipeline channels ────────────────────────────────────────────────────
@@ -54,7 +55,7 @@ public sealed class CallStreamHandler
         IGeminiStreamingService gemini,
         IElevenLabsStreamingService elevenlabs,
         TwilioSettings twilioSettings,
-        IHttpClientFactory httpClientFactory,
+        IMemoryCache cache,
         ILogger<CallStreamHandler> logger,
         string? streamSid = null)
     {
@@ -67,9 +68,9 @@ public sealed class CallStreamHandler
         _deepgram        = deepgram;
         _gemini          = gemini;
         _elevenlabs      = elevenlabs;
-        _twilio          = twilioSettings;
-        _httpClientFactory = httpClientFactory;
-        _logger          = logger;
+        _twilio  = twilioSettings;
+        _cache   = cache;
+        _logger  = logger;
 
         _dispatchContext = new CallDispatchContext(
             setup.CompanyId,
@@ -457,40 +458,28 @@ public sealed class CallStreamHandler
         }
     }
 
-    // ── Transfer via Twilio REST API ─────────────────────────────────────────
+    // ── Transfer via <Connect> action URL ────────────────────────────────────
+    // Store the target in IMemoryCache, then close the WebSocket.
+    // Twilio detects the WebSocket close, calls the <Connect action="..."> URL,
+    // and our TwilioController.Transfer() endpoint reads the cache and returns <Dial> TwiML.
 
     private async Task InitiateTransferAsync(string dialNumber, string? fallbackNumber, CancellationToken ct)
     {
-        var dialTag = fallbackNumber is { Length: > 0 }
-            ? $"<Dial action=\"{_twilio.BaseUrl}/api/twilio/dial-status?fallback={Uri.EscapeDataString(fallbackNumber)}\" timeout=\"25\"><Number>{dialNumber}</Number></Dial>"
-            : $"<Dial>{dialNumber}</Dial>";
+        var cacheValue = fallbackNumber is { Length: > 0 }
+            ? $"{dialNumber}|{fallbackNumber}"
+            : dialNumber;
 
-        var twiml = $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response>{dialTag}</Response>";
-
-        var url = $"{_twilio.ApiBaseUrl}/2010-04-01/Accounts/{_twilio.AccountSid}/Calls/{_callSid}.json";
-
-        using var body = new FormUrlEncodedContent(new[]
-        {
-            new KeyValuePair<string, string>("Twiml", twiml)
-        });
+        _cache.Set($"transfer_{_callSid}", cacheValue, TimeSpan.FromMinutes(5));
+        _logger.LogInformation("Transfer queued for {CallSid} → {Number}", _callSid, dialNumber);
 
         try
         {
-            var client = _httpClientFactory.CreateClient("Twilio");
-            var response = await client.PostAsync(url, body, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                var err = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogError("Transfer failed for {CallSid} — {Error}", _callSid, err);
-            }
-            else
-            {
-                _logger.LogInformation("Transfer initiated for {CallSid} → {Number}", _callSid, dialNumber);
-            }
+            if (_twilioWs.State == WebSocketState.Open)
+                await _twilioWs.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "transfer", ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Transfer request threw for {CallSid}", _callSid);
+            _logger.LogWarning(ex, "WebSocket close threw during transfer for {CallSid}", _callSid);
         }
     }
 }

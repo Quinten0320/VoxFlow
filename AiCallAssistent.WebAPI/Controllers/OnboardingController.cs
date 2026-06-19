@@ -212,6 +212,42 @@ public class OnboardingController(AppDbContext db) : ControllerBase
             }
         }
 
+        // ── 8. Save language / integration requests ──────────────────────────
+        if (request.LanguageRequests is { Count: > 0 })
+        {
+            foreach (var lr in request.LanguageRequests)
+            {
+                if (string.IsNullOrWhiteSpace(lr.Language)) continue;
+                db.CompanyRequests.Add(new AiCallAssistent.Domain.Models.CompanyRequest
+                {
+                    CompanyId = companyId,
+                    Type      = "language",
+                    Value     = lr.Language,
+                    Note      = lr.Email,
+                    Status    = "pending",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+        }
+
+        if (request.IntegrationRequests is { Count: > 0 })
+        {
+            foreach (var ir in request.IntegrationRequests)
+            {
+                if (string.IsNullOrWhiteSpace(ir.Name)) continue;
+                var note = string.Join(" — ", new[] { ir.Email, ir.Note }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                db.CompanyRequests.Add(new AiCallAssistent.Domain.Models.CompanyRequest
+                {
+                    CompanyId = companyId,
+                    Type      = "integration",
+                    Value     = ir.Name,
+                    Note      = string.IsNullOrEmpty(note) ? null : note,
+                    Status    = "pending",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+        }
+
         await db.SaveChangesAsync();
         return Ok(new { companyId });
     }

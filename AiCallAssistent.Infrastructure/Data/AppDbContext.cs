@@ -25,6 +25,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AssistantProfile> AssistantProfiles => Set<AssistantProfile>();
     public DbSet<BotActiveHour> BotActiveHours => Set<BotActiveHour>();
     public DbSet<KnowledgeSuggestion> KnowledgeSuggestions => Set<KnowledgeSuggestion>();
+    public DbSet<CompanyRequest> CompanyRequests => Set<CompanyRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -80,7 +80,7 @@ public class AppointmentService : IAppointmentService
         var endUtc = endTime.ToUniversalTime();
 
         var employeeId = request.EmployeeId.HasValue
-            ? await ValidateEmployeeAsync(request.EmployeeId.Value, request.CompanyId)
+            ? await ValidateEmployeeAsync(request.EmployeeId.Value, request.CompanyId, startUtc, endUtc)
             : await FindAvailableEmployeeIdAsync(request.CompanyId, startUtc, endUtc);
 
         var appointment = new Appointment
@@ -301,6 +301,77 @@ public class AppointmentService : IAppointmentService
         return rows > 0;
     }
 
+    public async Task<AppointmentResponse> RescheduleAppointmentAsync(
+        long appointmentId, DateTimeOffset newStartTime, short companyId)
+    {
+        var appointment = await _db.Appointments
+            .FirstOrDefaultAsync(a => a.AppointmentId == appointmentId && a.CompanyId == companyId)
+            ?? throw new ArgumentException("Afspraak niet gevonden of behoort niet tot dit bedrijf.");
+
+        var typeConfig = await _db.AppointmentTypes
+            .FirstOrDefaultAsync(t => t.CompanyId == companyId && t.Name == appointment.Type && t.IsActive)
+            ?? throw new InvalidOperationException("Afspraaktype niet meer actief.");
+
+        var startUtc = newStartTime.ToUniversalTime();
+        var endUtc   = startUtc.AddMinutes(typeConfig.DurationMinutes);
+
+        var startNl  = NlTimeZone.ConvertFromUtc(startUtc);
+        var dateNl   = DateOnly.FromDateTime(startNl.DateTime);
+        var timeNl   = TimeOnly.FromDateTime(startNl.DateTime);
+        var endTimeNl = TimeOnly.FromDateTime(NlTimeZone.ConvertFromUtc(endUtc).DateTime);
+
+        var ranges = await _openingHours.GetOpeningRangesForDateAsync(companyId, dateNl);
+        if (ranges.Count == 0)
+            throw new ArgumentException(
+                $"Het bedrijf is gesloten op {dateNl:dddd d MMMM}. Kies een andere datum.");
+
+        if (!ranges.Any(r => timeNl >= r.Start && endTimeNl <= r.End))
+            throw new ArgumentException(
+                $"Het tijdstip {timeNl:HH:mm} valt buiten de openingstijden. Roep check_availability aan voor {dateNl:yyyy-MM-dd} om beschikbare tijdsloten te vinden.");
+
+        // Check conflict for the same employee (excluding this appointment)
+        var hasConflict = await _db.Appointments
+            .AnyAsync(a => a.EmployeeId == appointment.EmployeeId
+                        && a.AppointmentId != appointmentId
+                        && a.StartTime < endUtc
+                        && a.EndTime > startUtc);
+
+        if (hasConflict)
+            throw new InvalidOperationException(
+                $"De medewerker heeft al een afspraak op dit tijdstip. Roep check_availability aan voor {dateNl:yyyy-MM-dd} om beschikbare tijdsloten te vinden.");
+
+        appointment.StartTime = startUtc;
+        appointment.EndTime   = endUtc;
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException pg && pg.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            throw new InvalidOperationException(
+                "Dit tijdstip is al bezet voor deze medewerker. Roep check_availability aan om andere beschikbare tijdsloten te vinden.", ex);
+        }
+
+        var employeeName = await _db.Employees
+            .Where(e => e.EmployeeId == appointment.EmployeeId)
+            .Select(e => e.Name)
+            .FirstAsync();
+
+        return new AppointmentResponse
+        {
+            AppointmentId = appointment.AppointmentId,
+            CompanyId     = appointment.CompanyId,
+            EmployeeId    = appointment.EmployeeId,
+            EmployeeName  = employeeName,
+            Type          = appointment.Type,
+            Description   = appointment.Description,
+            StartTime     = NlTimeZone.ConvertFromUtc(appointment.StartTime),
+            EndTime       = NlTimeZone.ConvertFromUtc(appointment.EndTime),
+        };
+    }
+
     /// <summary>
     /// Generates available slots by walking the opening range in steps of durationMinutes.
     /// Each grid position is checked against existing bookings for conflicts.
@@ -358,13 +429,23 @@ public class AppointmentService : IAppointmentService
         return rows.ConvertAll(r => new BookedSlot(r.EmployeeId, r.StartTime, r.EndTime));
     }
 
-    private async Task<long> ValidateEmployeeAsync(long employeeId, short companyId)
+    private async Task<long> ValidateEmployeeAsync(long employeeId, short companyId, DateTimeOffset startUtc, DateTimeOffset endUtc)
     {
         var exists = await _db.Employees
             .AnyAsync(e => e.EmployeeId == employeeId && e.CompanyId == companyId && e.IsActive);
 
         if (!exists)
             throw new ArgumentException("Employee not found or not active.");
+
+        var hasConflict = await _db.Appointments
+            .AnyAsync(a => a.EmployeeId == employeeId && a.StartTime < endUtc && a.EndTime > startUtc);
+
+        if (hasConflict)
+        {
+            var dateNl = DateOnly.FromDateTime(NlTimeZone.ConvertFromUtc(startUtc).DateTime);
+            throw new InvalidOperationException(
+                $"Deze medewerker heeft al een afspraak op dit tijdstip. Roep check_availability aan voor {dateNl:yyyy-MM-dd} om beschikbare tijdsloten te vinden.");
+        }
 
         return employeeId;
     }

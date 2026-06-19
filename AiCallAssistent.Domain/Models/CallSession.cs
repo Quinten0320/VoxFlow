@@ -48,4 +48,7 @@ public class CallSession
 
     [Column("duration_seconds")]
     public int? DurationSeconds { get; set; }
+
+    [Column("transcription_confidence")]
+    public double? TranscriptionConfidence { get; set; }
 }

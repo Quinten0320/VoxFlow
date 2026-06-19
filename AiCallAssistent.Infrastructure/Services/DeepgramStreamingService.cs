@@ -23,6 +23,10 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
     private ClientWebSocket? _ws;
     private Task? _receiveLoop;
 
+    private double _confidenceSum;
+    private int    _confidenceCount;
+    public double? AverageConfidence => _confidenceCount > 0 ? _confidenceSum / _confidenceCount : null;
+
     public ChannelReader<bool> SpeechStartedEvents => _speechStarted.Reader;
 
     public DeepgramStreamingService(IOptions<DeepgramSettings> settings, ILogger<DeepgramStreamingService> logger)
@@ -163,10 +167,17 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
 
             case "EndOfTurn":
                 // High-confidence end of turn — transcript is the complete utterance for this turn
+                var eotConfidence = root["end_of_turn_confidence"]?.GetValue<double>();
+                if (eotConfidence.HasValue)
+                {
+                    _confidenceSum   += eotConfidence.Value;
+                    _confidenceCount++;
+                }
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
                     _transcripts.Writer.TryWrite(transcript.Trim());
-                    _logger.LogDebug("Deepgram Flux EndOfTurn: {Transcript}", transcript);
+                    _logger.LogDebug("Deepgram Flux EndOfTurn (confidence={Confidence}): {Transcript}",
+                        eotConfidence, transcript);
                 }
                 else
                 {

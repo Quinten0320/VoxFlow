@@ -369,14 +369,16 @@ public record CompleteOnboardingRequest(
     string? CallMode,
     string? AfterHoursMode,
     string? EscalationNumber,
-    IReadOnlyList<string>?                      ForwardNumbers,
+    IReadOnlyList<string>?                          ForwardNumbers,
     string? RoutingRules,
     string? AutoMessageConfig,
     string? NotificationConfig,
-    IReadOnlyList<OnboardingOpeningHourRequest>  OpeningHours,
-    IReadOnlyList<OnboardingHolidayRequest>?     Holidays,
-    IReadOnlyList<OnboardingEmployeeRequest>?    Employees,
-    IReadOnlyList<OnboardingBlacklistRequest>?   Blacklist);
+    IReadOnlyList<OnboardingOpeningHourRequest>      OpeningHours,
+    IReadOnlyList<OnboardingHolidayRequest>?         Holidays,
+    IReadOnlyList<OnboardingEmployeeRequest>?        Employees,
+    IReadOnlyList<OnboardingBlacklistRequest>?       Blacklist,
+    IReadOnlyList<OnboardingLanguageRequest>?        LanguageRequests,
+    IReadOnlyList<OnboardingIntegrationRequest>?     IntegrationRequests);
 
 public record OnboardingOpeningHourRequest(
     short DayOfWeek,
@@ -398,6 +400,9 @@ public record OnboardingEmployeeRequest(
 public record OnboardingBlacklistRequest(
     string  PhoneNumber,
     string? Reason);
+
+public record OnboardingLanguageRequest(string Language, string? Email);
+public record OnboardingIntegrationRequest(string Name, string? Category, string? Email, string? Note);
 
 // ── Invoices (stub) ──────────────────────────────────────────────────────────
 

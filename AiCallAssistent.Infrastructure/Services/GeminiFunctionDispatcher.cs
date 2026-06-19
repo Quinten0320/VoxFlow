@@ -51,6 +51,9 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
             ["cancel_appointment"] = async (ctx, args) =>
                 await CancelAppointmentAsync(ctx, args, appointments),
 
+            ["reschedule_appointment"] = async (ctx, args) =>
+                await RescheduleAppointmentAsync(ctx, args, appointments),
+
             ["get_departments"] = async (ctx, _) =>
                 await departments.GetDepartmentsAsync(ctx.CompanyId),
 
@@ -140,6 +143,38 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         return cancelled
             ? new { success = true, message = "Appointment cancelled successfully." }
             : new { success = false, error = "Appointment not found or does not belong to this company." };
+    }
+
+    private static async Task<object> RescheduleAppointmentAsync(
+        CallDispatchContext context, JsonNode? args, IAppointmentService appointments)
+    {
+        if (args?["appointment_id"] is not JsonNode idNode)
+            return new { success = false, error = "appointment_id is required" };
+        if (args["new_start_time"] is not JsonNode startNode)
+            return new { success = false, error = "new_start_time is required" };
+
+        try
+        {
+            var result = await appointments.RescheduleAppointmentAsync(
+                idNode.GetValue<long>(),
+                ParseNlAware(startNode.GetValue<string>()),
+                context.CompanyId);
+
+            return new
+            {
+                success = true,
+                result.AppointmentId,
+                result.EmployeeName,
+                result.Type,
+                StartTime = result.StartTime.ToString("o"),
+                EndTime   = result.EndTime.ToString("o"),
+                message = "Appointment rescheduled successfully."
+            };
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return new { success = false, error = ex.Message };
+        }
     }
 
     private static object TransferToDepartment(CallDispatchContext context, string departmentName)
@@ -271,7 +306,17 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
                 {
                     ["appointment_id"] = Param("integer", "The ID of the appointment to cancel")
                 },
-                ["appointment_id"])
+                ["appointment_id"]),
+
+            FunctionDeclaration("reschedule_appointment",
+                "Move an existing appointment to a new date/time. " +
+                "Always call check_availability first to find a free slot, then confirm the new time with the caller before calling this.",
+                new JsonObject
+                {
+                    ["appointment_id"]  = Param("integer", "The ID of the appointment to reschedule"),
+                    ["new_start_time"]  = Param("string",  "New start time — ISO 8601 datetime, e.g. 2026-04-07T14:00:00+02:00")
+                },
+                ["appointment_id", "new_start_time"])
         };
 
         if (f.DepartmentRouting)

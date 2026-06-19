@@ -6,6 +6,7 @@ using AiCallAssistent.Application.Services;
 using AiCallAssistent.Infrastructure.Data;
 using AiCallAssistent.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -93,18 +94,36 @@ public static class TwilioStreamEndpoint
             var elevenlabs    = sp.GetRequiredService<IElevenLabsStreamingService>();
             var gemini        = sp.GetRequiredService<IGeminiStreamingService>();
             var twilioSettings = sp.GetRequiredService<IOptions<TwilioSettings>>().Value;
-            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+            var cache         = sp.GetRequiredService<IMemoryCache>();
 
             var handler = new CallStreamHandler(
                 ws, setup, callSid, calledNumber, callerNumber,
                 deepgram, gemini, elevenlabs,
-                twilioSettings, httpClientFactory, logger,
+                twilioSettings, cache, logger,
                 streamSid: streamSid);
 
             using var cts = new CancellationTokenSource();
             await handler.RunAsync(cts.Token);
 
+            // Persist Deepgram transcription confidence before disposing
+            var avgConfidence = deepgram.AverageConfidence;
             await deepgram.DisposeAsync();
+
+            if (avgConfidence.HasValue)
+            {
+                try
+                {
+                    var rows = await db.CallSessions
+                        .Where(s => s.CallSid == callSid)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.TranscriptionConfidence, avgConfidence.Value));
+                    if (rows == 0)
+                        logger.LogWarning("Could not find CallSession {CallSid} to save confidence", callSid);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to save transcription confidence for {CallSid}", callSid);
+                }
+            }
         }
         catch (Exception ex)
         {

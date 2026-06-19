@@ -8,6 +8,7 @@ using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using TwilioSettings = AiCallAssistent.Application.Configuration.TwilioSettings;
 
@@ -36,6 +37,7 @@ public class TwilioController : ControllerBase
     private readonly TwilioSettings _twilio;
     private readonly ILogger<TwilioController> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IMemoryCache _cache;
 
     public TwilioController(
         IElevenLabsService tts,
@@ -51,7 +53,8 @@ public class TwilioController : ControllerBase
         IOptions<TwilioSettings> twilioSettings,
         IWhatsAppService whatsApp,
         ILogger<TwilioController> logger,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        IMemoryCache cache)
     {
         _tts = tts;
         _stt = stt;
@@ -67,6 +70,7 @@ public class TwilioController : ControllerBase
         _whatsApp = whatsApp;
         _logger = logger;
         _scopeFactory = scopeFactory;
+        _cache = cache;
     }
 
     // ── Answer ───────────────────────────────────────────────────────────────
@@ -419,6 +423,35 @@ public class TwilioController : ControllerBase
         return TwimlResult(streamTwiml);
     }
 
+    // ── Transfer action callback ─────────────────────────────────────────────
+    // Called by Twilio after <Connect> ends (WebSocket closed by CallStreamHandler).
+    // If a transfer was queued in IMemoryCache, return <Dial> TwiML; otherwise hang up.
+
+    [HttpPost("transfer")]
+    [Consumes("application/x-www-form-urlencoded")]
+    public IActionResult Transfer()
+    {
+        var callSid = Request.Form["CallSid"].ToString();
+
+        if (_cache.TryGetValue($"transfer_{callSid}", out string? entry) && entry is { Length: > 0 })
+        {
+            _cache.Remove($"transfer_{callSid}");
+            var parts    = entry.Split('|');
+            var number   = parts[0];
+            var fallback = parts.Length > 1 ? parts[1] : null;
+            var dialTag  = fallback is { Length: > 0 }
+                ? $"""<Dial action="{_twilio.BaseUrl}/api/twilio/dial-status?fallback={Uri.EscapeDataString(fallback)}" timeout="25"><Number>{XmlEscape(number)}</Number></Dial>"""
+                : $"<Dial>{XmlEscape(number)}</Dial>";
+            var twiml = $"""<?xml version="1.0" encoding="UTF-8"?><Response>{dialTag}</Response>""";
+
+            _logger.LogInformation("Transfer action triggered for {CallSid} → {Number}", callSid, number);
+            return TwimlResult(twiml);
+        }
+
+        _logger.LogDebug("Transfer action for {CallSid} — no pending transfer, hanging up", callSid);
+        return TwimlResult("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>");
+    }
+
     private string BuildStreamTwiml(string calledNumber, string callerNumber, bool afterHoursNoAnswer = false)
     {
         var wsUrl = _twilio.BaseUrl.Replace("https://", "wss://", StringComparison.OrdinalIgnoreCase)
@@ -428,10 +461,12 @@ public class TwilioController : ControllerBase
             ? $"\n                    <Parameter name=\"noAnswer\" value=\"1\"/>"
             : "";
 
+        var transferActionUrl = $"{_twilio.BaseUrl}/api/twilio/transfer";
+
         return $"""
             <?xml version="1.0" encoding="UTF-8"?>
             <Response>
-                <Connect>
+                <Connect action="{XmlEscape(transferActionUrl)}">
                     <Stream url="{XmlEscape(wsUrl)}">
                         <Parameter name="calledNumber" value="{XmlEscape(calledNumber)}"/>
                         <Parameter name="callerNumber" value="{XmlEscape(callerNumber)}"/>{extraParam}

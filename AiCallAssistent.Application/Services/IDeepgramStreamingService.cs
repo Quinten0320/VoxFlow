@@ -18,4 +18,7 @@ public interface IDeepgramStreamingService : IAsyncDisposable
 
     /// <summary>Fires true whenever Deepgram detects speech starting — used for barge-in.</summary>
     ChannelReader<bool> SpeechStartedEvents { get; }
+
+    /// <summary>Average end_of_turn_confidence across all completed turns. Null if no turns were transcribed.</summary>
+    double? AverageConfidence { get; }
 }

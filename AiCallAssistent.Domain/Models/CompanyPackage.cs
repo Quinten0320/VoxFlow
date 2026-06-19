@@ -45,6 +45,27 @@ public class CompanyPackage
     [Column("updated_at")]
     public DateTimeOffset UpdatedAt { get; set; }
 
+    [Column("stripe_customer_id")]
+    public string? StripeCustomerId { get; set; }
+
+    [Column("stripe_subscription_id")]
+    public string? StripeSubscriptionId { get; set; }
+
+    [Column("subscription_status")]
+    public string SubscriptionStatus { get; set; } = "none";
+
+    [Column("trial_ends_at")]
+    public DateTimeOffset? TrialEndsAt { get; set; }
+
+    [Column("current_period_end")]
+    public DateTimeOffset? CurrentPeriodEnd { get; set; }
+
+    [Column("plan_name")]
+    public string? PlanName { get; set; }
+
+    [Column("billing_interval")]
+    public string? BillingInterval { get; set; }
+
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
 }
