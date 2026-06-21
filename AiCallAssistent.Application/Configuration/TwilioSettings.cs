@@ -7,7 +7,7 @@ public class TwilioSettings
     public string ApiKeySid { get; set; } = string.Empty;
     public string ApiKeySecret { get; set; } = string.Empty;
 
-    /// <summary>Public base URL used to build webhook callback URLs (ngrok in dev).</summary>
+    /// <summary>Public base URL used to build webhook callback URLs.</summary>
     public string BaseUrl { get; set; } = string.Empty;
 
     /// <summary>E.164 Twilio WhatsApp-enabled number. Leave empty to disable WhatsApp messaging.</summary>
