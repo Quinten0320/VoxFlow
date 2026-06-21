@@ -31,6 +31,24 @@ public class CallSession
     [Column("summary")]
     public string? Summary { get; set; }
 
+    [Column("caller_classification")]
+    public string? CallerClassification { get; set; }
+
     [Column("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
+
+    [Column("call_type")]
+    public string? CallType { get; set; }
+
+    [Column("transcript")]
+    public string? Transcript { get; set; }
+
+    [Column("caller_name")]
+    public string? CallerName { get; set; }
+
+    [Column("duration_seconds")]
+    public int? DurationSeconds { get; set; }
+
+    [Column("transcription_confidence")]
+    public double? TranscriptionConfidence { get; set; }
 }

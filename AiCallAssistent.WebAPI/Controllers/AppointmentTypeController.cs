@@ -24,7 +24,10 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
                 t.Name,
                 t.DisplayName,
                 t.DurationMinutes,
-                t.IsActive))
+                t.WaitTime,
+                t.IsActive,
+                t.AutoTransferEnabled,
+                t.AutoTransferDepartmentId))
             .ToListAsync();
 
         return Ok(types);
@@ -44,7 +47,10 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
                 t.Name,
                 t.DisplayName,
                 t.DurationMinutes,
-                t.IsActive))
+                t.WaitTime,
+                t.IsActive,
+                t.AutoTransferEnabled,
+                t.AutoTransferDepartmentId))
             .FirstOrDefaultAsync();
 
         if (type == null)
@@ -66,6 +72,7 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
             Name = request.Name,
             DisplayName = request.DisplayName,
             DurationMinutes = request.DurationMinutes,
+            WaitTime = request.WaitTime,
             IsActive = true
         };
 
@@ -77,7 +84,10 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
             type.Name,
             type.DisplayName,
             type.DurationMinutes,
-            type.IsActive);
+            type.WaitTime,
+            type.IsActive,
+            type.AutoTransferEnabled,
+            type.AutoTransferDepartmentId);
 
         return CreatedAtAction(nameof(GetById), new { id = type.AppointmentTypeId }, dto);
     }
@@ -95,7 +105,10 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
                 .SetProperty(t => t.Name, request.Name)
                 .SetProperty(t => t.DisplayName, request.DisplayName)
                 .SetProperty(t => t.DurationMinutes, request.DurationMinutes)
-                .SetProperty(t => t.IsActive, request.IsActive));
+                .SetProperty(t => t.WaitTime, request.WaitTime)
+                .SetProperty(t => t.IsActive, request.IsActive)
+                .SetProperty(t => t.AutoTransferEnabled, request.AutoTransferEnabled)
+                .SetProperty(t => t.AutoTransferDepartmentId, request.AutoTransferDepartmentId));
 
         if (rows == 0)
             return NotFound();

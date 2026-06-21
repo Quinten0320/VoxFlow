@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.Services;
 using Microsoft.Extensions.Options;
@@ -26,21 +27,25 @@ public class ElevenLabsService : IElevenLabsService
     {
         var url = $"{BaseUrl}/text-to-speech/{_settings.VoiceId}";
 
-        var payload = new
+        // Build payload manually so language_code is only included when the model supports it.
+        // eleven_turbo_v2_5 and flash models auto-detect language and reject the parameter.
+        var payload = new JsonObject
         {
-            text,
-            model_id = _settings.Model,
-            language_code = language ?? _settings.Language,
-            voice_settings = new
+            ["text"]     = text,
+            ["model_id"] = _settings.Model,
+            ["voice_settings"] = new JsonObject
             {
-                stability = 0.5,
-                similarity_boost = 0.75
+                ["stability"]        = 0.5,
+                ["similarity_boost"] = 0.75
             }
         };
 
+        if (_settings.SendLanguageCode)
+            payload["language_code"] = language ?? _settings.Language;
+
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Content = new StringContent(
-            JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            payload.ToJsonString(), Encoding.UTF8, "application/json");
         // Accept MP3 audio — ElevenLabs defaults to audio/mpeg when this header is set
         request.Headers.Add("Accept", "audio/mpeg");
 

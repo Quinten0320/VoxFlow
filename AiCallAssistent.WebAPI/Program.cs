@@ -1,6 +1,8 @@
+using System.Threading.RateLimiting;
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -35,18 +37,67 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+builder.Services.AddMemoryCache();
+
+builder.Services.AddRateLimiter(options =>
+{
+    // Global: 120 requests per minute per IP
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                AutoReplenishment = true,
+            }));
+
+    // Strict: 5 attempts per 15 minutes — used on admin login
+    options.AddFixedWindowLimiter("strict", opt =>
+    {
+        opt.PermitLimit = 5;
+        opt.Window = TimeSpan.FromMinutes(15);
+        opt.AutoReplenishment = true;
+    });
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+builder.Services.Configure<AiCallAssistent.Application.Configuration.AdminSettings>(
+    builder.Configuration.GetSection("Admin"));
+builder.Services.Configure<AiCallAssistent.Application.Configuration.StripeSettings>(
+    builder.Configuration.GetSection("Stripe"));
+Stripe.StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"] ?? "";
 builder.Services.AddSharedInfrastructure(builder.Configuration);
+builder.Services.AddEmailInfrastructure(builder.Configuration);
 
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy
-            .WithOrigins(
-                builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
+        var configured = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+
+        string[] allowedMethods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
+
+        if (builder.Environment.IsDevelopment() && configured.Length == 0)
+        {
+            policy
+                .SetIsOriginAllowed(origin =>
+                {
+                    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+                    return uri.Host == "localhost" || uri.Host == "127.0.0.1";
+                })
+                .AllowAnyHeader()
+                .WithMethods(allowedMethods)
+                .AllowCredentials();
+        }
+        else
+        {
+            policy
+                .WithOrigins(configured)
+                .AllowAnyHeader()
+                .WithMethods(allowedMethods)
+                .AllowCredentials();
+        }
     });
 });
 
@@ -60,7 +111,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         options.MapInboundClaims = false; // keep "sub", "email" etc. as-is
         options.TokenValidationParameters = new()
         {
-            ValidateIssuer = false,
+            ValidateIssuer = true,
+            ValidIssuer = supabaseAuthority,
             ValidateAudience = true,
             ValidAudience = "authenticated"
         };
@@ -87,8 +139,10 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+    app.UseHttpsRedirection();
 app.UseCors();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

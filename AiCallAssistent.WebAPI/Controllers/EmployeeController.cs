@@ -1,13 +1,15 @@
 using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
+using AiCallAssistent.Infrastructure.Services.Email;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace AiCallAssistent.WebAPI.Controllers;
 
 [Route("api/employees")]
-public class EmployeeController(AppDbContext db) : DashboardControllerBase(db)
+public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailTemplateService templates)
+    : DashboardControllerBase(db)
 {
     /// <summary>Returns all employees for the company.</summary>
     [HttpGet]
@@ -112,12 +114,27 @@ public class EmployeeController(AppDbContext db) : DashboardControllerBase(db)
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var rows = await Db.Employees
-            .Where(e => e.EmployeeId == id && e.CompanyId == companyId)
-            .ExecuteDeleteAsync();
+        var employee = await Db.Employees
+            .FirstOrDefaultAsync(e => e.EmployeeId == id && e.CompanyId == companyId);
+        if (employee == null) return NotFound();
 
-        if (rows == 0)
-            return NotFound();
+        Db.Employees.Remove(employee);
+        await Db.SaveChangesAsync();
+
+        if (employee.Email != null)
+        {
+            var company = await Db.Companies.FindAsync(companyId);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (s, h) = templates.TeamMemberRemoved(employee.Name, company?.CompanyName ?? "VoxFlow");
+                    await emailSender.SendNowAsync(companyId, employee.Email, employee.Name,
+                        "team_member_removed", s, h);
+                }
+                catch { }
+            });
+        }
 
         return NoContent();
     }

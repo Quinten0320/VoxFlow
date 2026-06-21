@@ -29,6 +29,21 @@ public class Employee
     [Column("auth_user_id")]
     public Guid? AuthUserId { get; set; }
 
+    [Column("role")]
+    public string? Role { get; set; }
+
+    [Column("phone")]
+    public string? Phone { get; set; }
+
+    [Column("email")]
+    public string? Email { get; set; }
+
+    [Column("last_login_at")]
+    public DateTimeOffset? LastLoginAt { get; set; }
+
+    [Column("known_ips")]
+    public string[] KnownIps { get; set; } = [];
+
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
 

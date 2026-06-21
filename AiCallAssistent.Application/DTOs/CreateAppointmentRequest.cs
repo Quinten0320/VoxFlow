@@ -8,4 +8,5 @@ public class CreateAppointmentRequest
     public DateTimeOffset StartTime { get; set; }
     public string Description { get; set; } = string.Empty;
     public string? CustomerName { get; set; }
+    public string? CallerPhoneNumber { get; set; }
 }

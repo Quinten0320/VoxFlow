@@ -10,7 +10,10 @@ public record CallStatsDto(
     int Today,
     int ThisWeek,
     int ThisMonth,
-    IReadOnlyList<DayCountDto> Last7Days);
+    IReadOnlyList<DayCountDto> Last7Days,
+    int OpenCallbacksCount,
+    int MissedCallsTodayCount,
+    int? AvgDurationSec);
 
 public record DayCountDto(DateOnly Date, int Count);
 
@@ -35,6 +38,9 @@ public record TypeCountDto(
 public record RecentCallDto(
     string CallSid,
     string CallerNumber,
+    string? CallerName,
     DateTimeOffset StartedAt,
     int? DurationSeconds,
-    string? Summary);
+    string? Summary,
+    string? CallType,
+    string Status);

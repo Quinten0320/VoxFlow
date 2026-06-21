@@ -1,0 +1,357 @@
+using System.Net.Http.Headers;
+using System.Text.Json.Nodes;
+using AiCallAssistent.Application.Configuration;
+using AiCallAssistent.Application.DTOs;
+using AiCallAssistent.Domain.Models;
+using AssistantSettings = AiCallAssistent.Domain.Models.AssistantSettings;
+using AiCallAssistent.Infrastructure.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+
+namespace AiCallAssistent.WebAPI.Controllers;
+
+[ApiController]
+[Authorize]
+[Route("api/onboarding")]
+public class OnboardingController(
+    AppDbContext db,
+    IHttpClientFactory httpClientFactory,
+    IOptions<TwilioSettings> twilioOptions,
+    ILogger<OnboardingController> logger) : ControllerBase
+{
+    /// <summary>
+    /// Completes the onboarding flow.
+    /// Creates the company + owner employee if they don't exist yet,
+    /// then upserts assistant_settings and opening_hours.
+    /// Safe to call multiple times (idempotent).
+    /// </summary>
+    [HttpPost("complete")]
+    public async Task<IActionResult> Complete([FromBody] CompleteOnboardingRequest request)
+    {
+        var sub = User.FindFirst("sub")?.Value;
+        if (sub == null || !Guid.TryParse(sub, out var authUserId))
+            return Unauthorized();
+
+        // ── 1. Find or create company + owner employee ──────────────────────
+        var employee = await db.Employees
+            .FirstOrDefaultAsync(e => e.AuthUserId == authUserId);
+
+        short companyId;
+
+        if (employee == null)
+        {
+            var company = new Company
+            {
+                CompanyName = request.CompanyName,
+                Branch      = request.Branch,
+                CompanyInfo = request.Branch,
+                IsActive    = true,
+                CreatedAt   = DateTimeOffset.UtcNow
+            };
+            db.Companies.Add(company);
+            await db.SaveChangesAsync(); // flush so EF Core populates CompanyId
+
+            companyId = company.CompanyId;
+
+            db.Employees.Add(new Employee
+            {
+                CompanyId   = companyId,
+                AuthUserId  = authUserId,
+                Name        = request.CompanyName,
+                IsOwner     = true,
+                IsActive    = true,
+                CreatedAt   = DateTimeOffset.UtcNow
+            });
+        }
+        else
+        {
+            companyId = employee.CompanyId;
+            var company = await db.Companies.FindAsync(companyId);
+            if (company != null)
+            {
+                company.CompanyName = request.CompanyName;
+                company.Branch      = request.Branch;
+                company.CompanyInfo = request.Branch;
+            }
+        }
+
+        // ── 2. Upsert assistant settings ─────────────────────────────────────
+        var settings = await db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+        {
+            settings = new AssistantSettings { CompanyId = companyId };
+            db.AssistantSettings.Add(settings);
+        }
+
+        settings.Prompt             = request.Prompt ?? string.Empty;
+        settings.Language           = "nl";
+        settings.GreetingsMessage   = request.GreetingsMessage;
+        settings.Tone               = request.Tone;
+        settings.CallMode           = request.CallMode ?? "first_line";
+        settings.AfterHoursMode     = request.AfterHoursMode;
+        settings.RoutingRules       = request.RoutingRules;
+        settings.AutoMessageConfig  = request.AutoMessageConfig;
+        settings.NotificationConfig = request.NotificationConfig;
+        settings.UpdatedAt          = DateTimeOffset.UtcNow;
+        settings.AssistantName      = request.AssistantName;
+        settings.VoiceKey           = request.VoiceKey;
+        settings.WaitTime           = request.WaitTime;
+        settings.ForwardNumbers     = request.ForwardNumbers is { Count: > 0 }
+            ? System.Text.Json.JsonSerializer.Serialize(request.ForwardNumbers)
+            : null;
+
+        // ── 3. Update escalation number on the existing phone row (if any) ───
+        if (!string.IsNullOrWhiteSpace(request.EscalationNumber))
+        {
+            var phone = await db.PhoneNumbers
+                .Where(p => p.CompanyId == companyId)
+                .FirstOrDefaultAsync();
+            if (phone != null)
+                phone.EscalationPhoneNumber = request.EscalationNumber;
+        }
+
+        // ── 4. Upsert opening hours ──────────────────────────────────────────
+        foreach (var h in request.OpeningHours)
+        {
+            var row = await db.CompanyOpeningHours
+                .Include(x => x.TimeRanges)
+                .FirstOrDefaultAsync(x => x.CompanyId == companyId && x.DayOfWeek == h.DayOfWeek);
+
+            if (row == null)
+            {
+                row = new CompanyOpeningHour { CompanyId = companyId, DayOfWeek = h.DayOfWeek };
+                db.CompanyOpeningHours.Add(row);
+            }
+
+            row.IsActive = h.IsActive;
+
+            // Replace time ranges entirely
+            db.CompanyOpeningTimeRanges.RemoveRange(row.TimeRanges);
+            row.TimeRanges.Clear();
+
+            if (h.IsActive && h.StartTime is { Length: > 0 } && h.EndTime is { Length: > 0 })
+            {
+                row.TimeRanges.Add(new CompanyOpeningTimeRange
+                {
+                    StartTime = TimeOnly.Parse(h.StartTime),
+                    EndTime   = TimeOnly.Parse(h.EndTime),
+                    SortOrder = 0,
+                    IsActive  = true
+                });
+            }
+        }
+
+        // ── 5. Upsert additional employees ──────────────────────────────────────
+        if (request.Employees is { Count: > 0 })
+        {
+            foreach (var emp in request.Employees)
+            {
+                if (string.IsNullOrWhiteSpace(emp.Name)) continue;
+                var existing = await db.Employees
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Name == emp.Name && !e.IsOwner);
+                if (existing == null)
+                    db.Employees.Add(new Employee
+                    {
+                        CompanyId = companyId,
+                        Name      = emp.Name,
+                        Role      = emp.Role,
+                        Phone     = emp.Phone,
+                        IsOwner   = false,
+                        IsActive  = true,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
+                else
+                {
+                    existing.Role  = emp.Role;
+                    existing.Phone = emp.Phone;
+                }
+            }
+        }
+
+        // ── 6. Upsert opening exceptions (holidays) ──────────────────────────
+        if (request.Holidays is { Count: > 0 })
+        {
+            foreach (var holiday in request.Holidays)
+            {
+                var start = holiday.Start ?? holiday.End;
+                var end   = holiday.End   ?? holiday.Start;
+                if (start is null) continue;
+
+                for (var d = start.Value; d <= end!.Value; d = d.AddDays(1))
+                {
+                    var ex = await db.CompanyOpeningExceptions
+                        .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.ExceptionDate == d);
+                    if (ex == null)
+                    {
+                        db.CompanyOpeningExceptions.Add(new CompanyOpeningException
+                        {
+                            CompanyId     = companyId,
+                            ExceptionDate = d,
+                            IsClosed      = holiday.IsClosed,
+                            IsActive      = true
+                        });
+                    }
+                    else
+                    {
+                        ex.IsClosed = holiday.IsClosed;
+                        ex.IsActive = true;
+                    }
+                }
+            }
+        }
+
+        // ── 7. Upsert blacklist entries ──────────────────────────────────────
+        if (request.Blacklist is { Count: > 0 })
+        {
+            foreach (var entry in request.Blacklist)
+            {
+                if (string.IsNullOrWhiteSpace(entry.PhoneNumber)) continue;
+                var exists = await db.CallBlacklist
+                    .AnyAsync(b => b.CompanyId == companyId && b.PhoneNumber == entry.PhoneNumber);
+                if (!exists)
+                    db.CallBlacklist.Add(new CallBlacklist
+                    {
+                        CompanyId   = companyId,
+                        PhoneNumber = entry.PhoneNumber,
+                        Reason      = entry.Reason,
+                        CreatedAt   = DateTimeOffset.UtcNow
+                    });
+            }
+        }
+
+        // ── 8. Save language / integration requests ──────────────────────────
+        if (request.LanguageRequests is { Count: > 0 })
+        {
+            foreach (var lr in request.LanguageRequests)
+            {
+                if (string.IsNullOrWhiteSpace(lr.Language)) continue;
+                db.CompanyRequests.Add(new AiCallAssistent.Domain.Models.CompanyRequest
+                {
+                    CompanyId = companyId,
+                    Type      = "language",
+                    Value     = lr.Language,
+                    Note      = lr.Email,
+                    Status    = "pending",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+        }
+
+        if (request.IntegrationRequests is { Count: > 0 })
+        {
+            foreach (var ir in request.IntegrationRequests)
+            {
+                if (string.IsNullOrWhiteSpace(ir.Name)) continue;
+                var note = string.Join(" — ", new[] { ir.Email, ir.Note }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                db.CompanyRequests.Add(new AiCallAssistent.Domain.Models.CompanyRequest
+                {
+                    CompanyId = companyId,
+                    Type      = "integration",
+                    Value     = ir.Name,
+                    Note      = string.IsNullOrEmpty(note) ? null : note,
+                    Status    = "pending",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+        }
+
+        // ── 9. Phone number ──────────────────────────────────────────────────────
+        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            var activatedNumber = request.PhoneNumber;
+
+            if (!request.PhoneIsOwned)
+            {
+                // Purchase a new number from Twilio and configure webhooks
+                activatedNumber = await BuyTwilioNumberAsync(request.PhoneNumber, companyId) ?? request.PhoneNumber;
+            }
+            // For owned numbers, webhooks are already configured — just save to DB
+
+            var existing = await db.PhoneNumbers.FirstOrDefaultAsync(p => p.CompanyId == companyId);
+            if (existing == null)
+            {
+                db.PhoneNumbers.Add(new PhoneNumber
+                {
+                    CompanyId             = companyId,
+                    AiPhoneNumber         = activatedNumber,
+                    EscalationPhoneNumber = null,
+                    IsActive              = true,
+                    CreatedAt             = DateTimeOffset.UtcNow,
+                });
+            }
+            else
+            {
+                existing.AiPhoneNumber = activatedNumber;
+                existing.IsActive      = true;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        return Ok(new { companyId });
+    }
+
+    private async Task<string?> BuyTwilioNumberAsync(string phoneNumber, short companyId)
+    {
+        var twilio = twilioOptions.Value;
+        if (string.IsNullOrEmpty(twilio.AccountSid) || string.IsNullOrEmpty(twilio.ApiKeySid))
+            return null;
+
+        try
+        {
+            var baseUrl  = twilio.BaseUrl?.TrimEnd('/') ?? "";
+            var voiceUrl = $"{baseUrl}/api/twilio/answer";
+            var statusCb = $"{baseUrl}/api/twilio/status";
+
+            var client      = httpClientFactory.CreateClient();
+            var credentials = Convert.ToBase64String(
+                System.Text.Encoding.ASCII.GetBytes($"{twilio.ApiKeySid}:{twilio.ApiKeySecret}"));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+
+            // NL numbers require a registered address — fetch the first one on the account
+            var addressSid = await FetchFirstAddressSidAsync(client, twilio.AccountSid);
+
+            var fields = new Dictionary<string, string>
+            {
+                ["PhoneNumber"]          = phoneNumber,
+                ["VoiceUrl"]             = voiceUrl,
+                ["VoiceMethod"]          = "POST",
+                ["StatusCallback"]       = statusCb,
+                ["StatusCallbackMethod"] = "POST",
+            };
+            if (addressSid != null)
+                fields["AddressSid"] = addressSid;
+
+            var url  = $"https://api.twilio.com/2010-04-01/Accounts/{twilio.AccountSid}/IncomingPhoneNumbers.json";
+            var resp = await client.PostAsync(url, new FormUrlEncodedContent(fields));
+            var body = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Twilio purchase failed for company {CompanyId}: {Body}", companyId, body);
+                return null;
+            }
+
+            return JsonNode.Parse(body)?["phone_number"]?.GetValue<string>();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Twilio purchase threw for company {CompanyId}", companyId);
+            return null;
+        }
+    }
+
+    private async Task<string?> FetchFirstAddressSidAsync(HttpClient client, string accountSid)
+    {
+        try
+        {
+            var resp = await client.GetAsync(
+                $"https://api.twilio.com/2010-04-01/Accounts/{accountSid}/Addresses.json?PageSize=1");
+            if (!resp.IsSuccessStatusCode) return null;
+            var body = await resp.Content.ReadAsStringAsync();
+            return JsonNode.Parse(body)?["addresses"]?[0]?["sid"]?.GetValue<string>();
+        }
+        catch { return null; }
+    }
+}

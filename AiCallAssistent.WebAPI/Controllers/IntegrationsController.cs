@@ -2,12 +2,15 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AiCallAssistent.Application.Configuration;
+using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Application.Services;
 using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
+using AiCallAssistent.Infrastructure.Services.Email;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace AiCallAssistent.WebAPI.Controllers;
@@ -19,7 +22,10 @@ public class IntegrationsController(
     IOptions<OutlookSettings> outlookSettings,
     IHttpClientFactory httpClientFactory,
     IOutlookCalendarService outlookCalendar,
-    ILogger<IntegrationsController> logger) : DashboardControllerBase(db)
+    IMemoryCache cache,
+    ILogger<IntegrationsController> logger,
+    EmailSender emailSender,
+    EmailTemplateService emailTemplates) : DashboardControllerBase(db)
 {
     private static readonly string[] Scopes = ["Calendars.ReadWrite", "offline_access", "User.Read"];
 
@@ -57,13 +63,18 @@ public class IntegrationsController(
 
         var s = outlookSettings.Value;
 
+        // Use a random GUID as the OAuth state to prevent CSRF.
+        // Store companyId under that key for 10 minutes — enough for the OAuth round-trip.
+        var oauthState = Guid.NewGuid().ToString("N");
+        cache.Set($"oauth_state_{oauthState}", companyId, TimeSpan.FromMinutes(10));
+
         var authUrl =
             $"{AuthorizeEndpoint}" +
             $"?client_id={Uri.EscapeDataString(s.ClientId)}" +
             $"&response_type=code" +
             $"&redirect_uri={Uri.EscapeDataString(s.RedirectUri)}" +
             $"&scope={Uri.EscapeDataString(string.Join(" ", Scopes))}" +
-            $"&state={companyId}" +
+            $"&state={oauthState}" +
             $"&prompt=select_account";
 
         return Ok(new { authUrl });
@@ -88,8 +99,12 @@ public class IntegrationsController(
             return BadRequest(new { error, description = error_description });
         }
 
-        if (code == null || !short.TryParse(state, out var companyId))
+        if (code == null || state == null ||
+            !cache.TryGetValue($"oauth_state_{state}", out short companyId))
             return BadRequest(new { error = "Invalid callback parameters" });
+
+        // Consume the state so it cannot be replayed
+        cache.Remove($"oauth_state_{state}");
 
         var s = outlookSettings.Value;
         var client = httpClientFactory.CreateClient();
@@ -107,8 +122,8 @@ public class IntegrationsController(
 
         if (!tokenResponse.IsSuccessStatusCode)
         {
-            var body = await tokenResponse.Content.ReadAsStringAsync();
-            logger.LogError("Outlook token exchange failed for company {CompanyId}: {Body}", companyId, body);
+            logger.LogError("Outlook token exchange failed for company {CompanyId}: HTTP {Status}",
+                companyId, tokenResponse.StatusCode);
             return StatusCode(502, new { error = "Token exchange with Microsoft failed" });
         }
 
@@ -158,6 +173,23 @@ public class IntegrationsController(
         await Db.SaveChangesAsync();
 
         logger.LogInformation("Outlook connected for company {CompanyId} ({Email})", companyId, email);
+
+        // Send integration connected email to the company owner
+        var ownerEmp = await Db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null);
+        if (ownerEmp?.Email != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (s, h) = emailTemplates.IntegrationConnected(ownerEmp.Name, "Microsoft Outlook");
+                    await emailSender.SendNowAsync(companyId, ownerEmp.Email, ownerEmp.Name,
+                        "integration_connected", s, h);
+                }
+                catch { }
+            });
+        }
 
         try
         {
@@ -266,5 +298,61 @@ public class IntegrationsController(
         return rows == 0
             ? NotFound(new { error = "Outlook is not connected for this company" })
             : NoContent();
+    }
+
+    // ── WhatsApp ────────────────────────────────────────────────────────────────
+
+    [HttpGet("whatsapp/status")]
+    public async Task<IActionResult> WhatsAppStatus()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var phoneNumber = await Db.AssistantSettings
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => s.WhatsAppPhoneNumber)
+            .FirstOrDefaultAsync();
+
+        return Ok(new { connected = !string.IsNullOrWhiteSpace(phoneNumber), phoneNumber });
+    }
+
+    [HttpPut("whatsapp/connect")]
+    public async Task<IActionResult> WhatsAppConnect([FromBody] WhatsAppConnectRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+            return BadRequest(new { error = "PhoneNumber is required." });
+
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+        {
+            settings = new Domain.Models.AssistantSettings { CompanyId = companyId };
+            Db.AssistantSettings.Add(settings);
+        }
+
+        settings.WhatsAppPhoneNumber = request.PhoneNumber.Trim();
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+
+        return Ok(new { connected = true, phoneNumber = settings.WhatsAppPhoneNumber });
+    }
+
+    [HttpDelete("whatsapp/disconnect")]
+    public async Task<IActionResult> WhatsAppDisconnect()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+            return NotFound(new { error = "No assistant settings found for this company." });
+
+        settings.WhatsAppPhoneNumber = null;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+
+        return NoContent();
     }
 }

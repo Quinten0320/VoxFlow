@@ -9,7 +9,10 @@ namespace AiCallAssistent.Application.Helpers;
 /// </summary>
 public static class ConversationSeeder
 {
-    public static JsonArray BuildInitialTurns(string welcomeText, JsonNode? appointmentTypesNode)
+    public static JsonArray BuildInitialTurns(
+        string welcomeText,
+        JsonNode? appointmentTypesNode,
+        JsonNode? departmentsNode = null)
     {
         var turns = new JsonArray();
 
@@ -47,6 +50,45 @@ public static class ConversationSeeder
                         {
                             ["name"] = "get_appointment_types",
                             ["response"] = new JsonObject { ["result"] = appointmentTypesNode }
+                        }
+                    }
+                }
+            });
+        }
+
+        if (departmentsNode is not null)
+        {
+            turns.Add(new JsonObject
+            {
+                ["role"] = "user",
+                ["parts"] = new JsonArray { new JsonObject { ["text"] = "Naar welke afdelingen kan ik worden doorverbonden?" } }
+            });
+            turns.Add(new JsonObject
+            {
+                ["role"] = "model",
+                ["parts"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["functionCall"] = new JsonObject
+                        {
+                            ["name"] = "get_departments",
+                            ["args"] = new JsonObject()
+                        }
+                    }
+                }
+            });
+            turns.Add(new JsonObject
+            {
+                ["role"] = "user",
+                ["parts"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["functionResponse"] = new JsonObject
+                        {
+                            ["name"] = "get_departments",
+                            ["response"] = new JsonObject { ["result"] = departmentsNode }
                         }
                     }
                 }
