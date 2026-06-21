@@ -69,6 +69,7 @@ internal static class GeminiRequestBuilder
             : """
 
               REGELS VOOR SPREEKSTIJL:
+              - Houd antwoorden KORT en BONDIG. Gebruik maximaal 1 à 2 zinnen per reactie. Geef direct antwoord zonder omhaal van woorden.
               - Gebruik NOOIT opsommingstekens, streepjes of genummerde lijsten. Dit is een telefoongesprek — geef opsommingen altijd als kommalijst, zoals: "technisch overleg van 30 minuten, een instapgesprek van 15 minuten, en een kennismaking van 20 minuten".
               - Noem tijden ALTIJD in gesproken taal. Gebruik het veld "spoken_time" uit de tool-respons — dat bevat de juiste gesproken tijd. Zeg dus "om kwart over 2 's middags", niet "14:15". Gebruik NOOIT digitale notaties zoals "09:00", "14:00" of "07:20".
               """;
