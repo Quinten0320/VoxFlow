@@ -2,6 +2,7 @@ using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,7 @@ public class AdminController(
     // ── Auth ─────────────────────────────────────────────────────────────────
 
     [HttpPost("login")]
+    [EnableRateLimiting("strict")]
     public IActionResult Login([FromBody] AdminLoginRequest request)
     {
         if (request.Username != _admin.Username || request.Password != _admin.Password)

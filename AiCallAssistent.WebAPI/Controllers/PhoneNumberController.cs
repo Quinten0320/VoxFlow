@@ -107,83 +107,137 @@ public class PhoneNumberController(
         return NoContent();
     }
 
-    /// <summary>Returns available Dutch Twilio phone numbers for purchase.</summary>
+    /// <summary>
+    /// Returns Dutch phone numbers available to purchase (Local, Mobile, TollFree).
+    /// Owned numbers are excluded — use the manual input if you want to reuse an existing number.
+    /// </summary>
     [HttpGet("available")]
     public async Task<IActionResult> GetAvailable()
     {
-        var (_, error) = await GetCompanyIdAsync();
+        var error = EnsureAuthenticated();
         if (error != null) return error;
 
-        var url = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}"
-            + "/AvailablePhoneNumbers/NL/Local.json?Limit=10";
-
-        logger.LogInformation("Fetching available numbers. AccountSid={AccountSid} ApiKeySid={ApiKeySid} URL={Url}",
-            _twilio.AccountSid, _twilio.ApiKeySid, url);
-
         var client = CreateTwilioClient();
-        var response = await client.GetAsync(url);
-        var body = await response.Content.ReadAsStringAsync();
+        var result = new List<AvailablePhoneNumberDto>();
 
-        logger.LogInformation("Twilio available numbers response: {Status} {Body}",
-            (int)response.StatusCode, body);
-
-        if (!response.IsSuccessStatusCode)
+        // Try Local, Mobile and TollFree — Mobile/TollFree have lighter regulatory requirements
+        var types = new[] { "Local", "Mobile", "TollFree" };
+        foreach (var type in types)
         {
-            // 404 from Twilio for NL numbers = regulatory compliance not yet set up.
-            // Return empty list so the UI shows "no numbers available" rather than crashing.
-            logger.LogWarning("Twilio AvailablePhoneNumbers returned {Status}: {Body}",
-                (int)response.StatusCode, body);
-            return Ok(Array.Empty<AvailablePhoneNumberDto>());
+            try
+            {
+                var url  = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/AvailablePhoneNumbers/NL/{type}.json?Limit=10";
+                var resp = await client.GetAsync(url);
+                var body = await resp.Content.ReadAsStringAsync();
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Twilio NL/{Type} returned {Status}: {Body}", type, (int)resp.StatusCode, body);
+                    continue;
+                }
+
+                var numbers = JsonNode.Parse(body)?["available_phone_numbers"]?.AsArray() ?? [];
+                foreach (var n in numbers)
+                {
+                    var num  = n!["phone_number"]?.GetValue<string>();
+                    var name = n["friendly_name"]?.GetValue<string>() ?? num ?? "";
+                    if (num != null)
+                        result.Add(new AvailablePhoneNumberDto(num, name, IsOwned: false));
+                }
+
+                logger.LogInformation("Twilio NL/{Type}: {Count} numbers", type, numbers.Count);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not fetch NL/{Type} numbers", type);
+            }
         }
 
-        var root = JsonNode.Parse(body);
-        var available = root?["available_phone_numbers"]?.AsArray()
-            .Select(n => new AvailablePhoneNumberDto(
-                n!["phone_number"]!.GetValue<string>(),
-                n["friendly_name"]!.GetValue<string>()))
-            .ToList() ?? [];
-
-        return Ok(available);
+        return Ok(result);
     }
 
-    /// <summary>Purchases a Twilio phone number and saves it to the company account.</summary>
+    /// <summary>
+    /// Activates a phone number for this company.
+    /// If the number is already owned (IsOwned=true), reconfigures its webhooks.
+    /// Otherwise purchases it from Twilio.
+    /// </summary>
     [HttpPost("purchase")]
     public async Task<IActionResult> Purchase([FromBody] PurchasePhoneNumberRequest request)
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var voiceUrl = $"{_twilio.BaseUrl}/api/twilio/answer";
+        var voiceUrl       = $"{_twilio.BaseUrl}/api/twilio/answer";
         var statusCallback = $"{_twilio.BaseUrl}/api/twilio/status";
+        var client         = CreateTwilioClient();
 
-        var url = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/IncomingPhoneNumbers.json";
-        var formContent = new FormUrlEncodedContent(new Dictionary<string, string>
+        string purchasedNumber;
+
+        if (request.IsOwned)
         {
-            ["PhoneNumber"]          = request.PhoneNumber,
-            ["VoiceUrl"]             = voiceUrl,
-            ["VoiceMethod"]          = "POST",
-            ["StatusCallback"]       = statusCallback,
-            ["StatusCallbackMethod"] = "POST",
-        });
+            // Find the SID of the owned number so we can update its config
+            var listUrl  = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/IncomingPhoneNumbers.json?PhoneNumber={Uri.EscapeDataString(request.PhoneNumber)}";
+            var listResp = await client.GetAsync(listUrl);
+            var listBody = await listResp.Content.ReadAsStringAsync();
 
-        var client = CreateTwilioClient();
-        var response = await client.PostAsync(url, formContent);
-        var body = await response.Content.ReadAsStringAsync();
+            if (!listResp.IsSuccessStatusCode)
+                return StatusCode((int)listResp.StatusCode, "Twilio lookup failed: " + listBody);
 
-        if (!response.IsSuccessStatusCode)
-            return StatusCode((int)response.StatusCode, "Twilio purchase failed: " + body);
+            var sid = JsonNode.Parse(listBody)?["incoming_phone_numbers"]?[0]?["sid"]?.GetValue<string>();
+            if (sid == null)
+                return BadRequest(new { error = "Nummer niet gevonden in Twilio-account." });
 
-        var root = JsonNode.Parse(body);
-        var purchasedNumber = root?["phone_number"]?.GetValue<string>() ?? request.PhoneNumber;
-        var friendlyName = root?["friendly_name"]?.GetValue<string>() ?? purchasedNumber;
+            var updateUrl = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/IncomingPhoneNumbers/{sid}.json";
+            var updateResp = await client.PostAsync(updateUrl, new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["VoiceUrl"]             = voiceUrl,
+                ["VoiceMethod"]          = "POST",
+                ["StatusCallback"]       = statusCallback,
+                ["StatusCallbackMethod"] = "POST",
+            }));
+
+            if (!updateResp.IsSuccessStatusCode)
+            {
+                var body = await updateResp.Content.ReadAsStringAsync();
+                return StatusCode((int)updateResp.StatusCode, "Twilio update failed: " + body);
+            }
+
+            purchasedNumber = request.PhoneNumber;
+            logger.LogInformation("Reconfigured existing Twilio number {Number} for company {CompanyId}", purchasedNumber, companyId);
+        }
+        else
+        {
+            // Purchase a new number
+            var buyUrl = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/IncomingPhoneNumbers.json";
+            var buyResp = await client.PostAsync(buyUrl, new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["PhoneNumber"]          = request.PhoneNumber,
+                ["VoiceUrl"]             = voiceUrl,
+                ["VoiceMethod"]          = "POST",
+                ["StatusCallback"]       = statusCallback,
+                ["StatusCallbackMethod"] = "POST",
+            }));
+
+            var buyBody = await buyResp.Content.ReadAsStringAsync();
+            if (!buyResp.IsSuccessStatusCode)
+                return StatusCode((int)buyResp.StatusCode, "Twilio purchase failed: " + buyBody);
+
+            purchasedNumber = JsonNode.Parse(buyBody)?["phone_number"]?.GetValue<string>() ?? request.PhoneNumber;
+            logger.LogInformation("Purchased new Twilio number {Number} for company {CompanyId}", purchasedNumber, companyId);
+        }
+
+        // Remove any existing phone number record for this company to avoid duplicates
+        await Db.PhoneNumbers
+            .Where(p => p.CompanyId == companyId)
+            .ExecuteDeleteAsync();
 
         var phoneNumber = new PhoneNumber
         {
-            CompanyId = companyId,
-            AiPhoneNumber = purchasedNumber,
+            CompanyId             = companyId,
+            AiPhoneNumber         = purchasedNumber,
             EscalationPhoneNumber = null,
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow
+            IsActive              = true,
+            CreatedAt             = DateTimeOffset.UtcNow,
         };
 
         Db.PhoneNumbers.Add(phoneNumber);

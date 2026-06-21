@@ -1,5 +1,6 @@
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Infrastructure.Data;
+using AiCallAssistent.Infrastructure.Services.Email;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,9 @@ namespace AiCallAssistent.WebAPI.Controllers;
 [Route("api/stripe")]
 public class StripeController(
     AppDbContext db,
-    IOptions<StripeSettings> stripeOptions) : DashboardControllerBase(db)
+    IOptions<StripeSettings> stripeOptions,
+    EmailSender emailSender,
+    EmailTemplateService emailTemplates) : DashboardControllerBase(db)
 {
     private readonly StripeSettings _stripe = stripeOptions.Value;
 
@@ -48,9 +51,10 @@ public class StripeController(
             },
             Metadata = new Dictionary<string, string>
             {
-                ["company_id"]   = companyId.ToString(),
-                ["plan_id"]      = request.PlanId,
-                ["interval"]     = request.Interval,
+                ["company_id"]    = companyId.ToString(),
+                ["plan_id"]       = request.PlanId,
+                ["interval"]      = request.Interval,
+                ["referral_code"] = request.ReferralCode ?? "",
             },
             PaymentMethodCollection = "always",
             SuccessUrl = $"{origin}/onboarding?stripe_success=1",
@@ -77,9 +81,9 @@ public class StripeController(
         {
             stripeEvent = EventUtility.ConstructEvent(payload, sigHeader, _stripe.WebhookSecret);
         }
-        catch (StripeException ex)
+        catch (StripeException)
         {
-            return BadRequest(new { error = ex.Message });
+            return BadRequest(new { error = "Invalid webhook signature" });
         }
 
         switch (stripeEvent.Type)
@@ -94,6 +98,10 @@ public class StripeController(
 
             case EventTypes.CustomerSubscriptionDeleted:
                 await HandleSubscriptionDeleted(stripeEvent);
+                break;
+
+            case "invoice.paid":
+                await HandleInvoicePaid(stripeEvent);
                 break;
         }
 
@@ -170,6 +178,39 @@ public class StripeController(
         pkg.UpdatedAt            = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();
+
+        // Link referrer if a referral code was provided
+        if (session.Metadata.TryGetValue("referral_code", out var refCode) && refCode?.Length > 0)
+        {
+            var referrerPkg = await Db.CompanyPackages
+                .FirstOrDefaultAsync(p => p.ReferralCode == refCode);
+            if (referrerPkg != null && referrerPkg.CompanyId != companyId)
+            {
+                pkg.ReferredByCompanyId = referrerPkg.CompanyId;
+                await Db.SaveChangesAsync();
+
+                // #54 ReferralSuccess — tell the referrer their friend just signed up
+                var referrerOwner = await Db.Employees
+                    .FirstOrDefaultAsync(e => e.CompanyId == referrerPkg.CompanyId
+                                           && e.IsOwner && e.IsActive && e.Email != null);
+                var referredOwner = await Db.Employees
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive);
+                if (referrerOwner?.Email != null && referredOwner != null)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var (s, h) = emailTemplates.ReferralSuccess(
+                                referrerOwner.Name, referredOwner.Name);
+                            await emailSender.SendNowAsync(referrerPkg.CompanyId,
+                                referrerOwner.Email, referrerOwner.Name, "referral_success", s, h);
+                        }
+                        catch { }
+                    });
+                }
+            }
+        }
     }
 
     private async Task HandleSubscriptionUpdated(Event stripeEvent)
@@ -205,8 +246,138 @@ public class StripeController(
 
         pkg.SubscriptionStatus = "canceled";
         pkg.UpdatedAt          = DateTimeOffset.UtcNow;
-
         await Db.SaveChangesAsync();
+
+        var owner = await Db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == pkg.CompanyId && e.IsOwner && e.IsActive
+                                   && e.Email != null);
+        if (owner?.Email == null) return;
+
+        // #13 SubscriptionCancelled
+        var eindDatum = (pkg.CurrentPeriodEnd ?? DateTimeOffset.UtcNow).ToString("dd-MM-yyyy");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var (s, h) = emailTemplates.SubscriptionCancelled(owner.Name, eindDatum);
+                await emailSender.SendNowAsync(pkg.CompanyId, owner.Email, owner.Name,
+                    "subscription_cancelled", s, h);
+            }
+            catch { }
+        });
+
+        // Schedule win-back sequence
+        var now         = DateTimeOffset.UtcNow;
+        var callCount   = await Db.CallSessions.CountAsync(c => c.CompanyId == pkg.CompanyId);
+        var geldigTot   = now.AddDays(14).ToString("dd-MM-yyyy");
+        await emailSender.ScheduleAsync(pkg.CompanyId, "winback_1",
+            new { aantalGesprekken = callCount }, now.AddDays(1));
+        await emailSender.ScheduleAsync(pkg.CompanyId, "winback_7",
+            new { kortingsPercentage = 25, aanbiedingGeldigTot = geldigTot }, now.AddDays(7));
+        await emailSender.ScheduleAsync(pkg.CompanyId, "winback_30",
+            new { }, now.AddDays(30));
+    }
+
+    private async Task HandleInvoicePaid(Event stripeEvent)
+    {
+        var invoice = stripeEvent.Data.Object as Invoice;
+        if (invoice == null || invoice.AmountPaid == 0) return;
+
+        // Look up the company package for this customer
+        var pkg = await Db.CompanyPackages
+            .FirstOrDefaultAsync(p => p.StripeCustomerId == invoice.CustomerId);
+        if (pkg == null) return;
+
+        var owner = await Db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == pkg.CompanyId && e.IsOwner && e.IsActive
+                                   && e.Email != null);
+
+        // #10 SubscriptionStarted — first real payment after trial
+        if (invoice.BillingReason == "subscription_cycle" && owner?.Email != null
+            && !await emailSender.AlreadySentAsync(pkg.CompanyId, "subscription_started", TimeSpan.FromDays(3650)))
+        {
+            var abonnement     = pkg.PlanName ?? "VoxFlow";
+            var startdatum     = DateTimeOffset.UtcNow.ToString("dd-MM-yyyy");
+            var volgendeFactuur = (pkg.CurrentPeriodEnd ?? DateTimeOffset.UtcNow.AddMonths(1))
+                                    .ToString("dd-MM-yyyy");
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (s, h) = emailTemplates.SubscriptionStarted(
+                        owner.Name, abonnement, startdatum, volgendeFactuur);
+                    await emailSender.SendNowAsync(pkg.CompanyId, owner.Email!, owner.Name,
+                        "subscription_started", s, h);
+                }
+                catch { }
+            });
+        }
+
+        // Referral reward — only on subscription_cycle, first payment
+        if (invoice.BillingReason != "subscription_cycle") return;
+
+        var referralPkg = await Db.CompanyPackages
+            .FirstOrDefaultAsync(p => p.StripeCustomerId == invoice.CustomerId
+                                   && p.ReferredByCompanyId != null
+                                   && p.ReferralRewardedAt == null);
+        if (referralPkg == null) return;
+
+        var referrer = await Db.CompanyPackages
+            .FirstOrDefaultAsync(p => p.CompanyId == referralPkg.ReferredByCompanyId
+                                   && p.StripeCustomerId != null);
+        if (referrer?.StripeCustomerId == null) return;
+
+        // Fetch the referrer's actual subscription to credit exactly 1 month's price
+        long creditCents;
+        if (referrer.StripeSubscriptionId != null)
+        {
+            var subService = new SubscriptionService();
+            var refSub     = await subService.GetAsync(referrer.StripeSubscriptionId);
+            var item       = refSub?.Items?.Data?.FirstOrDefault();
+            var unitAmount = item?.Price?.UnitAmount ?? 0;
+            // For yearly plans credit 1/12th; for monthly plans credit the full amount
+            creditCents = item?.Price?.Recurring?.Interval == "year"
+                ? -(unitAmount / 12)
+                : -unitAmount;
+        }
+        else
+        {
+            creditCents = -invoice.AmountPaid; // fallback: credit what the referred person paid
+        }
+
+        if (creditCents == 0) return;
+
+        var balanceService = new CustomerBalanceTransactionService();
+        await balanceService.CreateAsync(referrer.StripeCustomerId,
+            new CustomerBalanceTransactionCreateOptions
+            {
+                Amount      = creditCents,
+                Currency    = "eur",
+                Description = "Referral bonus – 1 maand gratis",
+            });
+
+        referralPkg.ReferralRewardedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+
+        // #55 ReferralRewarded — tell the referrer they got their credit
+        var referrerOwner = await Db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == referrer.CompanyId && e.IsOwner && e.IsActive
+                                   && e.Email != null);
+        if (referrerOwner?.Email != null)
+        {
+            var beloningBedrag = (Math.Abs(creditCents) / 100m)
+                .ToString("€#,##0.00", System.Globalization.CultureInfo.GetCultureInfo("nl-NL"));
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (s, h) = emailTemplates.ReferralRewarded(referrerOwner.Name, beloningBedrag);
+                    await emailSender.SendNowAsync(referrer.CompanyId, referrerOwner.Email!,
+                        referrerOwner.Name, "referral_rewarded", s, h);
+                }
+                catch { }
+            });
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -224,4 +395,4 @@ public class StripeController(
         };
 }
 
-public record CreateCheckoutSessionRequest(string PlanId, string Interval);
+public record CreateCheckoutSessionRequest(string PlanId, string Interval, string? ReferralCode);

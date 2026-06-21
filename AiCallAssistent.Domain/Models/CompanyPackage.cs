@@ -66,6 +66,15 @@ public class CompanyPackage
     [Column("billing_interval")]
     public string? BillingInterval { get; set; }
 
+    [Column("referral_code")]
+    public string? ReferralCode { get; set; }
+
+    [Column("referred_by_company_id")]
+    public short? ReferredByCompanyId { get; set; }
+
+    [Column("referral_rewarded_at")]
+    public DateTimeOffset? ReferralRewardedAt { get; set; }
+
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
 }

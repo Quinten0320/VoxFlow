@@ -1,16 +1,25 @@
+using System.Net.Http.Headers;
+using System.Text.Json.Nodes;
+using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Domain.Models;
+using AssistantSettings = AiCallAssistent.Domain.Models.AssistantSettings;
 using AiCallAssistent.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace AiCallAssistent.WebAPI.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/onboarding")]
-public class OnboardingController(AppDbContext db) : ControllerBase
+public class OnboardingController(
+    AppDbContext db,
+    IHttpClientFactory httpClientFactory,
+    IOptions<TwilioSettings> twilioOptions,
+    ILogger<OnboardingController> logger) : ControllerBase
 {
     /// <summary>
     /// Completes the onboarding flow.
@@ -248,7 +257,101 @@ public class OnboardingController(AppDbContext db) : ControllerBase
             }
         }
 
+        // ── 9. Phone number ──────────────────────────────────────────────────────
+        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            var activatedNumber = request.PhoneNumber;
+
+            if (!request.PhoneIsOwned)
+            {
+                // Purchase a new number from Twilio and configure webhooks
+                activatedNumber = await BuyTwilioNumberAsync(request.PhoneNumber, companyId) ?? request.PhoneNumber;
+            }
+            // For owned numbers, webhooks are already configured — just save to DB
+
+            var existing = await db.PhoneNumbers.FirstOrDefaultAsync(p => p.CompanyId == companyId);
+            if (existing == null)
+            {
+                db.PhoneNumbers.Add(new PhoneNumber
+                {
+                    CompanyId             = companyId,
+                    AiPhoneNumber         = activatedNumber,
+                    EscalationPhoneNumber = null,
+                    IsActive              = true,
+                    CreatedAt             = DateTimeOffset.UtcNow,
+                });
+            }
+            else
+            {
+                existing.AiPhoneNumber = activatedNumber;
+                existing.IsActive      = true;
+            }
+        }
+
         await db.SaveChangesAsync();
         return Ok(new { companyId });
+    }
+
+    private async Task<string?> BuyTwilioNumberAsync(string phoneNumber, short companyId)
+    {
+        var twilio = twilioOptions.Value;
+        if (string.IsNullOrEmpty(twilio.AccountSid) || string.IsNullOrEmpty(twilio.ApiKeySid))
+            return null;
+
+        try
+        {
+            var baseUrl  = twilio.BaseUrl?.TrimEnd('/') ?? "";
+            var voiceUrl = $"{baseUrl}/api/twilio/answer";
+            var statusCb = $"{baseUrl}/api/twilio/status";
+
+            var client      = httpClientFactory.CreateClient();
+            var credentials = Convert.ToBase64String(
+                System.Text.Encoding.ASCII.GetBytes($"{twilio.ApiKeySid}:{twilio.ApiKeySecret}"));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+
+            // NL numbers require a registered address — fetch the first one on the account
+            var addressSid = await FetchFirstAddressSidAsync(client, twilio.AccountSid);
+
+            var fields = new Dictionary<string, string>
+            {
+                ["PhoneNumber"]          = phoneNumber,
+                ["VoiceUrl"]             = voiceUrl,
+                ["VoiceMethod"]          = "POST",
+                ["StatusCallback"]       = statusCb,
+                ["StatusCallbackMethod"] = "POST",
+            };
+            if (addressSid != null)
+                fields["AddressSid"] = addressSid;
+
+            var url  = $"https://api.twilio.com/2010-04-01/Accounts/{twilio.AccountSid}/IncomingPhoneNumbers.json";
+            var resp = await client.PostAsync(url, new FormUrlEncodedContent(fields));
+            var body = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Twilio purchase failed for company {CompanyId}: {Body}", companyId, body);
+                return null;
+            }
+
+            return JsonNode.Parse(body)?["phone_number"]?.GetValue<string>();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Twilio purchase threw for company {CompanyId}", companyId);
+            return null;
+        }
+    }
+
+    private async Task<string?> FetchFirstAddressSidAsync(HttpClient client, string accountSid)
+    {
+        try
+        {
+            var resp = await client.GetAsync(
+                $"https://api.twilio.com/2010-04-01/Accounts/{accountSid}/Addresses.json?PageSize=1");
+            if (!resp.IsSuccessStatusCode) return null;
+            var body = await resp.Content.ReadAsStringAsync();
+            return JsonNode.Parse(body)?["addresses"]?[0]?["sid"]?.GetValue<string>();
+        }
+        catch { return null; }
     }
 }

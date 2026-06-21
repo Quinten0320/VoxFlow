@@ -227,9 +227,9 @@ public record UpdatePhoneNumberRequest(
     string? EscalationPhoneNumber,
     bool IsActive);
 
-public record AvailablePhoneNumberDto(string PhoneNumber, string FriendlyName);
+public record AvailablePhoneNumberDto(string PhoneNumber, string FriendlyName, bool IsOwned);
 
-public record PurchasePhoneNumberRequest(string PhoneNumber);
+public record PurchasePhoneNumberRequest(string PhoneNumber, bool IsOwned = false);
 
 public record BlacklistEntryDto(
     long BlacklistId,
@@ -378,7 +378,9 @@ public record CompleteOnboardingRequest(
     IReadOnlyList<OnboardingEmployeeRequest>?        Employees,
     IReadOnlyList<OnboardingBlacklistRequest>?       Blacklist,
     IReadOnlyList<OnboardingLanguageRequest>?        LanguageRequests,
-    IReadOnlyList<OnboardingIntegrationRequest>?     IntegrationRequests);
+    IReadOnlyList<OnboardingIntegrationRequest>?     IntegrationRequests,
+    string? PhoneNumber = null,
+    bool PhoneIsOwned = false);
 
 public record OnboardingOpeningHourRequest(
     short DayOfWeek,

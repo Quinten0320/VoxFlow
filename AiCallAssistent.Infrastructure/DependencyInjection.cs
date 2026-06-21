@@ -4,6 +4,7 @@ using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.Services;
 using AiCallAssistent.Infrastructure.Data;
 using AiCallAssistent.Infrastructure.Services;
+using AiCallAssistent.Infrastructure.Services.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -53,6 +54,20 @@ public static class DependencyInjection
 
         services.AddScoped<IWhatsAppService, WhatsAppService>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Gmail SMTP email services — shared between all API processes that send transactional email.
+    /// </summary>
+    public static IServiceCollection AddEmailInfrastructure(this IServiceCollection services,
+                                                            IConfiguration configuration)
+    {
+        services.Configure<GmailSettings>(configuration.GetSection("Gmail"));
+        services.AddSingleton<IEmailService, SmtpEmailService>();
+        services.AddSingleton<EmailTemplateService>();
+        services.AddSingleton<EmailSender>();
+        services.AddHostedService<EmailJobBackgroundService>();
         return services;
     }
 
