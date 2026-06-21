@@ -16,4 +16,11 @@ public class GeminiSettings
     /// In development, run: gcloud auth application-default login
     /// </summary>
     public string ServiceAccountKeyPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Alternative to ServiceAccountKeyPath: the full JSON content of the service account key.
+    /// Use this in hosted environments (Azure) where file paths are not available.
+    /// Set via the Gemini__ServiceAccountKeyJson app setting.
+    /// </summary>
+    public string ServiceAccountKeyJson { get; set; } = string.Empty;
 }

@@ -12,9 +12,11 @@ public sealed class VertexAiTokenProvider : IVertexAiTokenProvider
     public VertexAiTokenProvider(IOptions<GeminiSettings> settings)
     {
         var s = settings.Value;
-        var raw = string.IsNullOrWhiteSpace(s.ServiceAccountKeyPath)
-            ? GoogleCredential.GetApplicationDefault()
-            : GoogleCredential.FromFile(s.ServiceAccountKeyPath);
+        var raw = !string.IsNullOrWhiteSpace(s.ServiceAccountKeyJson)
+            ? GoogleCredential.FromJson(s.ServiceAccountKeyJson)
+            : !string.IsNullOrWhiteSpace(s.ServiceAccountKeyPath)
+                ? GoogleCredential.FromFile(s.ServiceAccountKeyPath)
+                : GoogleCredential.GetApplicationDefault();
 
         _credential = raw.CreateScoped("https://www.googleapis.com/auth/cloud-platform");
     }
