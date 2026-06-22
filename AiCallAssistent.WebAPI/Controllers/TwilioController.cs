@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
-using AiCallAssistent.API.Filters;
+using AiCallAssistent.WebAPI.Filters;
 using AiCallAssistent.Application.Constants;
 using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Application.Services;
@@ -12,7 +12,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using TwilioSettings = AiCallAssistent.Application.Configuration.TwilioSettings;
 
-namespace AiCallAssistent.API.Controllers;
+namespace AiCallAssistent.WebAPI.Controllers;
 
 /// <summary>
 /// Inbound call flow: Twilio / Deepgram / Gemini / ElevenLabs.

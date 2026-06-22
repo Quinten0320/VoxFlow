@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Infrastructure;
+using AiCallAssistent.WebAPI.WebSockets;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi.Models;
@@ -68,6 +69,8 @@ builder.Services.Configure<AiCallAssistent.Application.Configuration.StripeSetti
     builder.Configuration.GetSection("Stripe"));
 Stripe.StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"] ?? "";
 builder.Services.AddSharedInfrastructure(builder.Configuration);
+builder.Services.AddCallPipelineInfrastructure(builder.Configuration);
+builder.Services.AddBackgroundServices();
 builder.Services.AddEmailInfrastructure(builder.Configuration);
 
 builder.Services.AddCors(options =>
@@ -141,6 +144,16 @@ if (app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/ws/twilio"))
+    {
+        await TwilioStreamEndpoint.HandleAsync(context);
+        return;
+    }
+    await next(context);
+});
 app.UseCors();
 app.UseRateLimiter();
 app.UseAuthentication();

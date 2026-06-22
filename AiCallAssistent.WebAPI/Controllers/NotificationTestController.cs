@@ -3,7 +3,7 @@ using AiCallAssistent.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace AiCallAssistent.API.Controllers;
+namespace AiCallAssistent.WebAPI.Controllers;
 
 /// <summary>
 /// Quick manual trigger for testing outbound WhatsApp notifications.

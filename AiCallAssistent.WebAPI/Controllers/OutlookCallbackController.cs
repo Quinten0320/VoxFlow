@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
-namespace AiCallAssistent.API.Controllers;
+namespace AiCallAssistent.WebAPI.Controllers;
 
 [Route("api/integrations/outlook")]
 [ApiController]

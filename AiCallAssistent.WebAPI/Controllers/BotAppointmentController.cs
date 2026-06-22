@@ -2,15 +2,15 @@ using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Application.Services;
 using Microsoft.AspNetCore.Mvc;
 
-namespace AiCallAssistent.API.Controllers;
+namespace AiCallAssistent.WebAPI.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-public class AppointmentController : ControllerBase
+[Route("api/appointment")]
+public class BotAppointmentController : ControllerBase
 {
     private readonly IAppointmentService _appointmentService;
 
-    public AppointmentController(IAppointmentService appointmentService)
+    public BotAppointmentController(IAppointmentService appointmentService)
     {
         _appointmentService = appointmentService;
     }

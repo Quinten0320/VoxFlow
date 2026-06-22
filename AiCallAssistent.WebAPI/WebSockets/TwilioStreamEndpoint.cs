@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace AiCallAssistent.API.WebSockets;
+namespace AiCallAssistent.WebAPI.WebSockets;
 
 public static class TwilioStreamEndpoint
 {

@@ -1,6 +1,0 @@
-@AiCallAssistent.API_HostAddress = http://localhost:5003
-
-GET {{AiCallAssistent.API_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
-namespace AiCallAssistent.API.Controllers;
+namespace AiCallAssistent.WebAPI.Controllers;
 
 /// <summary>
 /// Tests the full call flow without Twilio or Deepgram.

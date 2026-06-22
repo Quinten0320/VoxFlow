@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
 
-namespace AiCallAssistent.API.Filters;
+namespace AiCallAssistent.WebAPI.Filters;
 
 /// <summary>
 /// Validates the X-Twilio-Signature header on incoming webhook requests.
