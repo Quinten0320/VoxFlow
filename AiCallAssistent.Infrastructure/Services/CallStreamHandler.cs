@@ -40,6 +40,10 @@ public sealed class CallStreamHandler
     // ── Mutable state ────────────────────────────────────────────────────────
     private string? _streamSid;
     private volatile bool _isBotSpeaking;
+    // Set to true only after the first audio byte is sent in each speaking turn.
+    // Prevents spurious barge-in during the ~300ms ElevenLabs latency window where
+    // _isBotSpeaking=true but no audio has reached Twilio yet.
+    private volatile bool _botAudioStarted;
 
     // ── Pre-built call context ───────────────────────────────────────────────
     private readonly CallDispatchContext _dispatchContext;
@@ -231,6 +235,14 @@ public sealed class CallStreamHandler
                     continue;
                 }
 
+                if (!_botAudioStarted)
+                {
+                    // Bot is "speaking" but hasn't sent a single audio byte yet (ElevenLabs
+                    // latency window ~300ms). Firing barge-in here would cause silent interruption.
+                    _logger.LogInformation("SpeechStarted received before first audio byte — ignoring for {CallSid}", _callSid);
+                    continue;
+                }
+
                 _isBotSpeaking = false;
                 _bargeIn.Writer.TryWrite(true);
                 await SendClearToTwilioAsync(ct);
@@ -260,11 +272,9 @@ public sealed class CallStreamHandler
                     continue;
                 }
 
-                // Drain any stale barge-in that arrived while Gemini was processing (~1-2s).
-                // Without this, a SpeechStarted for the caller's own utterance can land in
-                // _bargeIn right as we set _isBotSpeaking = true, causing the first audio chunk
-                // to trigger an immediate "interrupted" and produce complete silence.
+                // Drain any stale barge-in that arrived while Gemini was processing.
                 _bargeIn.Reader.TryRead(out _);
+                _botAudioStarted = false;
                 _isBotSpeaking = true;
                 var interrupted = await StreamResponseAsync(result, ct);
                 _isBotSpeaking = false;
@@ -390,10 +400,13 @@ public sealed class CallStreamHandler
 
     // ── Twilio WS send helpers ───────────────────────────────────────────────
 
-    private Task SendAudioToTwilioAsync(ReadOnlyMemory<byte> mulawChunk, CancellationToken ct) =>
-        SendWsTextAsync(
+    private Task SendAudioToTwilioAsync(ReadOnlyMemory<byte> mulawChunk, CancellationToken ct)
+    {
+        _botAudioStarted = true;
+        return SendWsTextAsync(
             $"{{\"event\":\"media\",\"streamSid\":\"{_streamSid}\",\"media\":{{\"payload\":\"{Convert.ToBase64String(mulawChunk.Span)}\"}}}}",
             ct);
+    }
 
     private Task SendClearToTwilioAsync(CancellationToken ct) =>
         SendWsTextAsync($"{{\"event\":\"clear\",\"streamSid\":\"{_streamSid}\"}}", ct);
@@ -418,6 +431,7 @@ public sealed class CallStreamHandler
 
     private async Task SendWelcomeAudioAsync(CancellationToken ct)
     {
+        _botAudioStarted = false;
         _isBotSpeaking = true;
         try
         {
@@ -439,6 +453,7 @@ public sealed class CallStreamHandler
     private async Task PlayErrorMessageAsync(CancellationToken ct)
     {
         const string errorText = "Er is een fout opgetreden. Probeert u het straks opnieuw.";
+        _botAudioStarted = false;
         _isBotSpeaking = true;
         try
         {
