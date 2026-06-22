@@ -32,14 +32,20 @@ public sealed class CallStreamHandler
     private readonly Channel<byte[]> _audioIn =
         Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
 
-    private readonly Channel<bool> _bargeIn =
-        Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
-
     private readonly SemaphoreSlim _wsSendLock = new(1, 1);
 
     // ── Mutable state ────────────────────────────────────────────────────────
     private string? _streamSid;
     private volatile bool _isBotSpeaking;
+
+    // _suppressBargeIn: true while Gemini is processing (prevents stale StartOfTurn events
+    // that arrived during the user's utterance from triggering a premature barge-in).
+    // Set to true before RunConversationStreamingAsync, cleared just after _isBotSpeaking=true.
+    private volatile bool _suppressBargeIn;
+
+    // Cancelled by MonitorSpeechStartedAsync when a real barge-in fires.
+    // Passed (via linked CTS) to ElevenLabs so audio streaming stops immediately.
+    private CancellationTokenSource _playbackCts = new();
 
     // ── Pre-built call context ───────────────────────────────────────────────
     private readonly CallDispatchContext _dispatchContext;
@@ -128,6 +134,7 @@ public sealed class CallStreamHandler
         finally
         {
             _wsSendLock.Dispose();
+            _playbackCts.Dispose();
         }
     }
 
@@ -225,14 +232,17 @@ public sealed class CallStreamHandler
         {
             await foreach (var _ in _deepgram.SpeechStartedEvents.ReadAllAsync(ct))
             {
-                if (!_isBotSpeaking)
+                if (_suppressBargeIn || !_isBotSpeaking)
                 {
-                    _logger.LogInformation("SpeechStarted received but bot not speaking — ignoring for {CallSid}", _callSid);
+                    _logger.LogInformation("SpeechStarted ignored (suppress={Suppress} speaking={Speaking}) for {CallSid}",
+                        _suppressBargeIn, _isBotSpeaking, _callSid);
                     continue;
                 }
 
                 _isBotSpeaking = false;
-                _bargeIn.Writer.TryWrite(true);
+                // Cancel the playback CTS so ElevenLabs StreamAsync exits immediately,
+                // rather than waiting for the next 20 ms sub-chunk check.
+                _playbackCts.Cancel();
                 await SendClearToTwilioAsync(ct);
                 _logger.LogInformation("Barge-in triggered for {CallSid}", _callSid);
             }
@@ -250,36 +260,39 @@ public sealed class CallStreamHandler
             {
                 _logger.LogDebug("Transcript for {CallSid}: {Transcript}", _callSid, transcript);
 
+                // Suppress barge-in while Gemini processes: StartOfTurn events from the caller's
+                // own utterance are still in the channel at this point. MonitorSpeechStartedAsync
+                // will consume and discard them (no competing TryRead drain needed).
+                _suppressBargeIn = true;
                 var result = await _gemini.RunConversationStreamingAsync(
                     _dispatchContext, transcript, _callSid, _callConfig, ct);
 
                 if (!result.Success)
                 {
+                    _suppressBargeIn = false;
                     _logger.LogError("Gemini failed for {CallSid}: {Error}", _callSid, result.Error);
                     await PlayErrorMessageAsync(ct);
                     continue;
                 }
 
-                // Drain stale barge-in signals and any StartOfTurn events that Deepgram fired
-                // for the caller's own utterance while Gemini was processing (~600-900ms).
-                // Without this, those events fire a spurious barge-in the moment we set
-                // _isBotSpeaking=true, causing the bot to be "interrupted" before a single
-                // audio byte has been sent and producing complete silence.
-                _bargeIn.Reader.TryRead(out _);
-                while (_deepgram.SpeechStartedEvents.TryRead(out _)) { }
+                // Prepare a fresh playback CTS for this turn so MonitorSpeechStartedAsync
+                // can cancel it the moment barge-in fires, stopping ElevenLabs immediately.
+                _playbackCts.Dispose();
+                _playbackCts = new CancellationTokenSource();
+
+                // Set _isBotSpeaking BEFORE clearing _suppressBargeIn so MonitorSpeechStartedAsync
+                // always sees a consistent pair (volatile ordering guarantee).
                 _isBotSpeaking = true;
+                _suppressBargeIn = false;
+
                 var interrupted = await StreamResponseAsync(result, ct);
                 _isBotSpeaking = false;
 
                 if (!interrupted)
                 {
-                    // Bot finished speaking naturally — discard transcripts that piled up
-                    // while we were processing (e.g. impatient "hallo?" from the caller).
-                    // Exception: if a barge-in fired right as the last audio chunk was sent
-                    // (race condition — bot audio was still in Twilio's buffer when the user spoke),
-                    // the barge-in signal is unread in _bargeIn. Consume it and skip the drain
-                    // so that the user's transcript is kept.
-                    if (!_bargeIn.Reader.TryRead(out _))
+                    // Bot finished naturally. If _playbackCts was cancelled right as the last
+                    // chunk was sent (late barge-in), keep the user's transcript; otherwise drain.
+                    if (!_playbackCts.IsCancellationRequested)
                         _deepgram.DrainPendingTranscripts();
                 }
 
@@ -341,26 +354,42 @@ public sealed class CallStreamHandler
         _logger.LogDebug("Streaming sentence for {CallSid}: {Preview}",
             _callSid, sentence.Length > 60 ? sentence[..60] + "…" : sentence);
 
+        // Link with _playbackCts so MonitorSpeechStartedAsync can abort the ElevenLabs
+        // HTTP stream immediately on barge-in rather than waiting for the next sub-chunk.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _playbackCts.Token);
+        var playbackCt = linked.Token;
+
         var elChunks = 0;
-        await foreach (var chunk in _elevenlabs.StreamAsync(sentence, ct))
+        try
         {
-            elChunks++;
-            var mem = chunk.AsMemory();
-            var offset = 0;
-
-            while (offset < mem.Length)
+            await foreach (var chunk in _elevenlabs.StreamAsync(sentence, playbackCt))
             {
-                if (_bargeIn.Reader.TryRead(out _))
-                {
-                    _logger.LogInformation("Barge-in mid-audio for {CallSid} (EL chunk {Chunk}, byte {Offset}/{Total})",
-                        _callSid, elChunks, offset, mem.Length);
-                    return true;
-                }
+                elChunks++;
+                var mem = chunk.AsMemory();
+                var offset = 0;
 
-                var size = Math.Min(SubChunkBytes, mem.Length - offset);
-                await SendAudioToTwilioAsync(mem.Slice(offset, size), ct);
-                offset += size;
+                while (offset < mem.Length)
+                {
+                    // Belt-and-suspenders check: _isBotSpeaking is set false by
+                    // MonitorSpeechStartedAsync before it cancels _playbackCts.
+                    if (!_isBotSpeaking)
+                    {
+                        _logger.LogInformation("Barge-in mid-audio for {CallSid} (EL chunk {Chunk}, byte {Offset}/{Total})",
+                            _callSid, elChunks, offset, mem.Length);
+                        return true;
+                    }
+
+                    var size = Math.Min(SubChunkBytes, mem.Length - offset);
+                    await SendAudioToTwilioAsync(mem.Slice(offset, size), ct);
+                    offset += size;
+                }
             }
+        }
+        catch (OperationCanceledException) when (_playbackCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // _playbackCts was cancelled by MonitorSpeechStartedAsync — this is a barge-in.
+            _logger.LogInformation("Barge-in cancelled ElevenLabs stream for {CallSid}", _callSid);
+            return true;
         }
 
         if (elChunks == 0)
@@ -441,12 +470,13 @@ public sealed class CallStreamHandler
     private async Task PlayErrorMessageAsync(CancellationToken ct)
     {
         const string errorText = "Er is een fout opgetreden. Probeert u het straks opnieuw.";
+        _suppressBargeIn = false;
         _isBotSpeaking = true;
         try
         {
             await foreach (var chunk in _elevenlabs.StreamAsync(errorText, ct))
             {
-                if (_bargeIn.Reader.TryRead(out _)) break;
+                if (!_isBotSpeaking) break;
                 await SendAudioToTwilioAsync(chunk.AsMemory(), ct);
             }
         }
