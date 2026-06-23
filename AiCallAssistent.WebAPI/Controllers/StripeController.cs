@@ -40,7 +40,9 @@ public class StripeController(
                 }
             });
 
-        var origin = $"{Request.Scheme}://{Request.Host}";
+        var origin = !string.IsNullOrWhiteSpace(request.FrontendOrigin)
+            ? request.FrontendOrigin.TrimEnd('/')
+            : $"{Request.Scheme}://{Request.Host}";
 
         var options = new SessionCreateOptions
         {
@@ -462,4 +464,4 @@ public class StripeController(
     }
 }
 
-public record CreateCheckoutSessionRequest(string PlanId, string Interval, string? ReferralCode);
+public record CreateCheckoutSessionRequest(string PlanId, string Interval, string? ReferralCode, string? FrontendOrigin);
