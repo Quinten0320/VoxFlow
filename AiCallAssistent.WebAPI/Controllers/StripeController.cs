@@ -29,7 +29,16 @@ public class StripeController(
 
         var priceId = ResolvePriceId(request.PlanId, request.Interval);
         if (priceId is not { Length: > 0 })
-            return BadRequest(new { error = "Onbekend pakket of interval." });
+            return BadRequest(new {
+                error = "Onbekend pakket of interval.",
+                received = new { planId = request.PlanId, interval = request.Interval },
+                resolved = priceId,
+                configured = new {
+                    startMonthly = _stripe.StartMonthlyPriceId?.Length > 0,
+                    basisMonthly = _stripe.BasisMonthlyPriceId?.Length > 0,
+                    groeiMonthly = _stripe.GroeiMonthlyPriceId?.Length > 0
+                }
+            });
 
         var origin = $"{Request.Scheme}://{Request.Host}";
 
