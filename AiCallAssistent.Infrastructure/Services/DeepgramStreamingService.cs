@@ -183,30 +183,49 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
 
                     if (eotConfidence.HasValue && eotConfidence.Value < EotGraceThreshold)
                     {
-                        // Low confidence: hold the transcript for EotGraceMs.
-                        // If StartOfTurn arrives before the timer fires (user continued speaking),
-                        // CancelPendingEot() will discard this turn entirely.
-                        var capturedTranscript  = transcript.Trim();
-                        var capturedConfidence  = eotConfidence;
-                        var cts = new CancellationTokenSource();
-                        _pendingEotCts = cts;
-                        _ = Task.Run(async () =>
+                        var capturedTranscript = transcript.Trim();
+                        var capturedConfidence = eotConfidence;
+
+                        // If the utterance ends with terminal punctuation the user clearly
+                        // finished their thought — fire immediately even at low confidence.
+                        // Only apply the grace period to fragments without terminal punctuation
+                        // (e.g. "Hallo," where the user is mid-sentence).
+                        var lastChar = capturedTranscript[^1];
+                        var endsWithTerminal = lastChar is '.' or '?' or '!';
+
+                        if (!endsWithTerminal)
                         {
-                            try
+                            // No terminal punctuation → might be mid-sentence → hold for EotGraceMs.
+                            // If StartOfTurn arrives before the timer fires (user continued speaking),
+                            // CancelPendingEot() will discard this turn entirely.
+                            var cts = new CancellationTokenSource();
+                            _pendingEotCts = cts;
+                            _ = Task.Run(async () =>
                             {
-                                await Task.Delay(EotGraceMs, cts.Token);
-                                _transcripts.Writer.TryWrite(capturedTranscript);
-                                _logger.LogInformation(
-                                    "[DEEPGRAM] EndOfTurn (low-conf grace elapsed) confidence={Confidence:F2}: \"{Transcript}\"",
-                                    capturedConfidence, capturedTranscript);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                _logger.LogDebug(
-                                    "[DEEPGRAM] EndOfTurn grace cancelled (user continued): \"{Transcript}\"",
-                                    capturedTranscript);
-                            }
-                        }, CancellationToken.None);
+                                try
+                                {
+                                    await Task.Delay(EotGraceMs, cts.Token);
+                                    _transcripts.Writer.TryWrite(capturedTranscript);
+                                    _logger.LogInformation(
+                                        "[DEEPGRAM] EndOfTurn (low-conf grace elapsed) confidence={Confidence:F2}: \"{Transcript}\"",
+                                        capturedConfidence, capturedTranscript);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    _logger.LogDebug(
+                                        "[DEEPGRAM] EndOfTurn grace cancelled (user continued): \"{Transcript}\"",
+                                        capturedTranscript);
+                                }
+                            }, CancellationToken.None);
+                        }
+                        else
+                        {
+                            // Terminal punctuation → complete thought → fire immediately
+                            _transcripts.Writer.TryWrite(capturedTranscript);
+                            _logger.LogInformation(
+                                "[DEEPGRAM] EndOfTurn (low-conf, complete) confidence={Confidence:F2}: \"{Transcript}\"",
+                                capturedConfidence, capturedTranscript);
+                        }
                     }
                     else
                     {
