@@ -239,19 +239,15 @@ public sealed class CallStreamHandler
             {
                 if (_suppressBargeIn || !_isBotSpeaking)
                 {
-                    _logger.LogInformation("SpeechStarted ignored (suppress={Suppress} speaking={Speaking}) for {CallSid}",
+                    _logger.LogDebug("SpeechStarted ignored (suppress={Suppress} speaking={Speaking}) for {CallSid}",
                         _suppressBargeIn, _isBotSpeaking, _callSid);
                     continue;
                 }
 
                 _isBotSpeaking = false;
-                _logger.LogInformation("[BARGEIN] isBotSpeaking=false, cancelling playbackCts for {CallSid}", _callSid);
-                // Cancel the playback CTS so ElevenLabs StreamAsync exits immediately,
-                // rather than waiting for the next 20 ms sub-chunk check.
                 _playbackCts.Cancel();
-                _logger.LogInformation("[BARGEIN] playbackCts cancelled, sending Twilio clear for {CallSid}", _callSid);
                 await SendClearToTwilioAsync(ct);
-                _logger.LogInformation("[BARGEIN] Barge-in complete (clear sent) for {CallSid}", _callSid);
+                _logger.LogInformation("[BARGEIN] Barge-in triggered for {CallSid}", _callSid);
             }
         }
         catch (OperationCanceledException) { }
@@ -288,7 +284,6 @@ public sealed class CallStreamHandler
                 _playbackCts.Dispose();
                 _playbackCts = new CancellationTokenSource();
                 _audioBytesThisTurn = 0;
-                _logger.LogInformation("[BARGEIN] Fresh playbackCts created for {CallSid}", _callSid);
 
                 // Set _isBotSpeaking BEFORE clearing _suppressBargeIn so MonitorSpeechStartedAsync
                 // always sees a consistent pair (volatile ordering guarantee).
@@ -306,8 +301,7 @@ public sealed class CallStreamHandler
                     var totalPlaybackMs = _audioBytesThisTurn / 8;
                     var elapsedMs = (long)(DateTimeOffset.UtcNow - _botAudioFirstByteSentAt).TotalMilliseconds;
                     var remainingMs = (int)Math.Max(0, totalPlaybackMs - elapsedMs + 200); // +200ms Twilio buffer
-                    _logger.LogInformation("[BARGEIN] Playback window: totalMs={Total} elapsedMs={Elapsed} waitingMs={Waiting} for {CallSid}",
-                        totalPlaybackMs, elapsedMs, remainingMs, _callSid);
+                    _logger.LogInformation("[BARGEIN] Post-send window {Waiting}ms for {CallSid}", remainingMs, _callSid);
 
                     if (remainingMs > 0)
                     {
@@ -317,10 +311,9 @@ public sealed class CallStreamHandler
                         }
                         catch (OperationCanceledException)
                         {
-                            // Barge-in fired during the post-send window — send clear to Twilio
-                            // (MonitorSpeechStartedAsync already set _isBotSpeaking=false)
+                            // MonitorSpeechStartedAsync already cancelled _playbackCts, set _isBotSpeaking=false,
+                            // and sent the clear — nothing more to do here.
                             _logger.LogInformation("[BARGEIN] Barge-in during post-send window for {CallSid}", _callSid);
-                            await SendClearToTwilioAsync(ct);
                             interrupted = true;
                         }
                     }
@@ -476,9 +469,8 @@ public sealed class CallStreamHandler
 
     private async Task SendClearToTwilioAsync(CancellationToken ct)
     {
-        _logger.LogInformation("[TWILIO] Sending clear event for streamSid={StreamSid} callSid={CallSid}", _streamSid, _callSid);
         await SendWsTextAsync($"{{\"event\":\"clear\",\"streamSid\":\"{_streamSid}\"}}", ct);
-        _logger.LogInformation("[TWILIO] Clear event sent for {CallSid}", _callSid);
+        _logger.LogInformation("[TWILIO] Clear sent for {CallSid}", _callSid);
     }
 
     private async Task SendWsTextAsync(string json, CancellationToken ct)
