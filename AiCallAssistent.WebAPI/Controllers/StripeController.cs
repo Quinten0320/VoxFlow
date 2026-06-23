@@ -108,6 +108,42 @@ public class StripeController(
         return Ok();
     }
 
+    // ── Subscription Status ───────────────────────────────────────────────────
+
+    [HttpGet("status")]
+    public async Task<IActionResult> GetStatus()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var pkg = await Db.CompanyPackages.FirstOrDefaultAsync(p => p.CompanyId == companyId);
+        if (pkg == null)
+            return Ok(new { status = "none", planName = (string?)null, interval = (string?)null,
+                            trialEndsAt = (DateTimeOffset?)null, currentPeriodEnd = (DateTimeOffset?)null,
+                            cancelAtPeriodEnd = false });
+
+        var cancelAtPeriodEnd = false;
+        if (pkg.StripeSubscriptionId is { Length: > 0 })
+        {
+            try
+            {
+                var sub = await new SubscriptionService().GetAsync(pkg.StripeSubscriptionId);
+                cancelAtPeriodEnd = sub.CancelAtPeriodEnd;
+            }
+            catch { /* Stripe unreachable — return what we have in DB */ }
+        }
+
+        return Ok(new
+        {
+            status           = pkg.SubscriptionStatus,
+            planName         = pkg.PlanName,
+            interval         = pkg.BillingInterval,
+            trialEndsAt      = pkg.TrialEndsAt,
+            currentPeriodEnd = pkg.CurrentPeriodEnd,
+            cancelAtPeriodEnd,
+        });
+    }
+
     // ── Customer Portal ───────────────────────────────────────────────────────
 
     [HttpPost("portal")]
@@ -230,7 +266,18 @@ public class StripeController(
         pkg.CurrentPeriodEnd = item != null
             ? new DateTimeOffset(item.CurrentPeriodEnd, TimeSpan.Zero)
             : null;
-        pkg.UpdatedAt          = DateTimeOffset.UtcNow;
+        pkg.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Update plan name / interval when the customer upgrades or downgrades
+        if (item?.Price?.Id is { Length: > 0 } priceId)
+        {
+            var (planId, interval) = ResolvePlanFromPriceId(priceId);
+            if (planId != null)
+            {
+                pkg.PlanName        = planId;
+                pkg.BillingInterval = interval;
+            }
+        }
 
         await Db.SaveChangesAsync();
     }
@@ -393,6 +440,17 @@ public class StripeController(
             ("Groei", "yearly")  => _stripe.GroeiYearlyPriceId,
             _                    => null,
         };
+
+    private (string? planId, string? interval) ResolvePlanFromPriceId(string priceId)
+    {
+        if (priceId == _stripe.StartMonthlyPriceId) return ("Start", "monthly");
+        if (priceId == _stripe.StartYearlyPriceId)  return ("Start", "yearly");
+        if (priceId == _stripe.BasisMonthlyPriceId) return ("Basis", "monthly");
+        if (priceId == _stripe.BasisYearlyPriceId)  return ("Basis", "yearly");
+        if (priceId == _stripe.GroeiMonthlyPriceId) return ("Groei", "monthly");
+        if (priceId == _stripe.GroeiYearlyPriceId)  return ("Groei", "yearly");
+        return (null, null);
+    }
 }
 
 public record CreateCheckoutSessionRequest(string PlanId, string Interval, string? ReferralCode);

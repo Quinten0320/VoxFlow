@@ -22,6 +22,7 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
 
     private ClientWebSocket? _ws;
     private Task? _receiveLoop;
+    private CancellationTokenSource? _pendingEotCts;
 
     private double _confidenceSum;
     private int    _confidenceCount;
@@ -160,24 +161,60 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
         switch (eventType)
         {
             case "StartOfTurn":
-                // User started speaking — trigger barge-in if bot is currently talking
+                // User started speaking — cancel any pending low-confidence EOT and trigger barge-in
+                CancelPendingEot();
                 _speechStarted.Writer.TryWrite(true);
                 _logger.LogDebug("[DEEPGRAM] StartOfTurn received");
                 break;
 
             case "EndOfTurn":
-                // High-confidence end of turn — transcript is the complete utterance for this turn
                 var eotConfidence = root["end_of_turn_confidence"]?.GetValue<double>();
                 if (eotConfidence.HasValue)
                 {
                     _confidenceSum   += eotConfidence.Value;
                     _confidenceCount++;
                 }
+                // Cancel any previous pending low-confidence turn (superseded by a newer EOT)
+                CancelPendingEot();
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
-                    _transcripts.Writer.TryWrite(transcript.Trim());
-                    _logger.LogInformation("[DEEPGRAM] EndOfTurn confidence={Confidence:F2}: \"{Transcript}\"",
-                        eotConfidence, transcript);
+                    const double EotGraceThreshold = 0.85;
+                    const int    EotGraceMs        = 1200;
+
+                    if (eotConfidence.HasValue && eotConfidence.Value < EotGraceThreshold)
+                    {
+                        // Low confidence: hold the transcript for EotGraceMs.
+                        // If StartOfTurn arrives before the timer fires (user continued speaking),
+                        // CancelPendingEot() will discard this turn entirely.
+                        var capturedTranscript  = transcript.Trim();
+                        var capturedConfidence  = eotConfidence;
+                        var cts = new CancellationTokenSource();
+                        _pendingEotCts = cts;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(EotGraceMs, cts.Token);
+                                _transcripts.Writer.TryWrite(capturedTranscript);
+                                _logger.LogInformation(
+                                    "[DEEPGRAM] EndOfTurn (low-conf grace elapsed) confidence={Confidence:F2}: \"{Transcript}\"",
+                                    capturedConfidence, capturedTranscript);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                _logger.LogDebug(
+                                    "[DEEPGRAM] EndOfTurn grace cancelled (user continued): \"{Transcript}\"",
+                                    capturedTranscript);
+                            }
+                        }, CancellationToken.None);
+                    }
+                    else
+                    {
+                        // High confidence: fire immediately
+                        _transcripts.Writer.TryWrite(transcript.Trim());
+                        _logger.LogInformation("[DEEPGRAM] EndOfTurn confidence={Confidence:F2}: \"{Transcript}\"",
+                            eotConfidence, transcript);
+                    }
                 }
                 else
                 {
@@ -186,8 +223,8 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
                 break;
 
             case "TurnResumed":
-                // User continued speaking after an EagerEndOfTurn — treat as barge-in
-                // to interrupt the bot if it started responding speculatively
+                // User continued speaking after an EagerEndOfTurn — cancel grace period and barge-in
+                CancelPendingEot();
                 _speechStarted.Writer.TryWrite(true);
                 _logger.LogDebug("[DEEPGRAM] TurnResumed received");
                 break;
@@ -210,8 +247,17 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
         }
     }
 
+    private void CancelPendingEot()
+    {
+        var cts = Interlocked.Exchange(ref _pendingEotCts, null);
+        if (cts == null) return;
+        cts.Cancel();
+        cts.Dispose();
+    }
+
     public async ValueTask DisposeAsync()
     {
+        CancelPendingEot();
         _transcripts.Writer.TryComplete();
         _speechStarted.Writer.TryComplete();
 

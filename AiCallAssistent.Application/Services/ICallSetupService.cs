@@ -29,7 +29,8 @@ public record CallSetupData(
     string[]? TopicsNo = null,
     string? FallbackBehavior = null,
     string? BehaviorInstructions = null,
-    string? RoutingRulesJson = null);
+    string? RoutingRulesJson = null,
+    bool SubscriptionLocked = false);
 
 /// <summary>All data required to process a recording turn — loaded once at the top of Recording().</summary>
 public record CallRecordingContext(

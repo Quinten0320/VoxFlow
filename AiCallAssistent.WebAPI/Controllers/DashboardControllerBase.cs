@@ -51,6 +51,33 @@ public abstract class DashboardControllerBase(AppDbContext db) : ControllerBase
         return (employee.CompanyId, null);
     }
 
+    /// <summary>
+    /// Returns 402 if the company's subscription is expired (past_due / canceled past period end).
+    /// Call after <see cref="GetCompanyIdAsync"/> on endpoints that should be locked out.
+    /// Returns null if the subscription is fine or no package row exists yet (onboarding).
+    /// </summary>
+    protected async Task<IActionResult?> RequireActiveSubscriptionAsync(short companyId)
+    {
+        var pkg = await Db.CompanyPackages
+            .AsNoTracking()
+            .Where(p => p.CompanyId == companyId)
+            .Select(p => new { p.SubscriptionStatus, p.CurrentPeriodEnd })
+            .FirstOrDefaultAsync();
+
+        if (pkg == null) return null;
+
+        var locked = pkg.SubscriptionStatus switch
+        {
+            "past_due" or "unpaid" => true,
+            "canceled" => pkg.CurrentPeriodEnd == null || pkg.CurrentPeriodEnd < DateTimeOffset.UtcNow,
+            _ => false,
+        };
+
+        return locked
+            ? StatusCode(402, new { error = "Abonnement verlopen.", status = pkg.SubscriptionStatus })
+            : null;
+    }
+
     private async Task TrackLoginAsync(Employee employee, string? email,
                                        EmailSender? emailSender, EmailTemplateService? templates)
     {

@@ -86,6 +86,32 @@ public class TwilioController : ControllerBase
 
         var setup = await _callSetup.LoadAsync(calledNumber, callerNumber);
 
+        // Subscription lockout — pass the call straight through to escalation number.
+        if (setup.SubscriptionLocked)
+        {
+            _logger.LogInformation("Subscription locked for company {CompanyId} — passing through {CallSid}",
+                setup.CompanyId, callSid);
+            if (setup.EscalationNumber is { Length: > 0 } passthrough)
+            {
+                return TwimlResult(
+                    $"""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <Response>
+                        <Dial callerId="{XmlEscape(callerNumber)}">
+                            <Number>{XmlEscape(passthrough)}</Number>
+                        </Dial>
+                    </Response>
+                    """);
+            }
+            return TwimlResult("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Response>
+                    <Say language="nl-NL">Onze telefonische assistent is momenteel niet beschikbaar. Probeer het later opnieuw.</Say>
+                    <Hangup/>
+                </Response>
+                """);
+        }
+
         // Blacklist check.
         if (setup.Features.Blacklist)
         {

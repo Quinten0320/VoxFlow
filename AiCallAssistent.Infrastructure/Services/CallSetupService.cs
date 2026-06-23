@@ -49,6 +49,30 @@ public class CallSetupService(
 
         var features = await packageService.GetFeaturesAsync(companyId);
 
+        var isSubscriptionLocked = false;
+        try
+        {
+            var pkg = await db.CompanyPackages
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId)
+                .Select(p => new { p.SubscriptionStatus, p.CurrentPeriodEnd })
+                .FirstOrDefaultAsync();
+
+            if (pkg != null)
+            {
+                isSubscriptionLocked = pkg.SubscriptionStatus switch
+                {
+                    "past_due" or "unpaid" => true,
+                    "canceled" => pkg.CurrentPeriodEnd == null || pkg.CurrentPeriodEnd < DateTimeOffset.UtcNow,
+                    _ => false,
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not check subscription status for company {CompanyId}", companyId);
+        }
+
         Domain.Models.AssistantSettings? assistantSettings = null;
         try
         {
@@ -177,7 +201,8 @@ public class CallSetupService(
             TopicsNo:              topicsNo,
             FallbackBehavior:      fallbackBehavior,
             BehaviorInstructions:  behaviorInstructions,
-            RoutingRulesJson:      routingRulesJson);
+            RoutingRulesJson:      routingRulesJson,
+            SubscriptionLocked:    isSubscriptionLocked);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)
