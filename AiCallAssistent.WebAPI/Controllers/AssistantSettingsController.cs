@@ -15,6 +15,8 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
+        var lockout = await RequireActiveSubscriptionAsync(companyId);
+        if (lockout != null) return lockout;
 
         var settings = await Db.AssistantSettings
             .Where(s => s.CompanyId == companyId)
