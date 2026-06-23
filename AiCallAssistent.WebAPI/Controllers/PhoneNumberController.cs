@@ -235,7 +235,7 @@ public class PhoneNumberController(
         {
             CompanyId             = companyId,
             AiPhoneNumber         = purchasedNumber,
-            EscalationPhoneNumber = null,
+            EscalationPhoneNumber = "",
             IsActive              = true,
             CreatedAt             = DateTimeOffset.UtcNow,
         };
