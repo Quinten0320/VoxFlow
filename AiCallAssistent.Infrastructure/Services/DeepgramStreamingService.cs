@@ -162,7 +162,7 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
             case "StartOfTurn":
                 // User started speaking — trigger barge-in if bot is currently talking
                 _speechStarted.Writer.TryWrite(true);
-                _logger.LogInformation("Deepgram Flux StartOfTurn received");
+                _logger.LogInformation("[DEEPGRAM] StartOfTurn received (speechStarted channel write attempted)");
                 break;
 
             case "EndOfTurn":
@@ -176,12 +176,12 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
                     _transcripts.Writer.TryWrite(transcript.Trim());
-                    _logger.LogDebug("Deepgram Flux EndOfTurn (confidence={Confidence}): {Transcript}",
+                    _logger.LogInformation("[DEEPGRAM] EndOfTurn confidence={Confidence:F2}: \"{Transcript}\"",
                         eotConfidence, transcript);
                 }
                 else
                 {
-                    _logger.LogDebug("Deepgram Flux EndOfTurn with empty transcript — ignoring");
+                    _logger.LogDebug("[DEEPGRAM] EndOfTurn with empty transcript — ignoring");
                 }
                 break;
 
@@ -189,7 +189,7 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
                 // User continued speaking after an EagerEndOfTurn — treat as barge-in
                 // to interrupt the bot if it started responding speculatively
                 _speechStarted.Writer.TryWrite(true);
-                _logger.LogInformation("Deepgram Flux TurnResumed received");
+                _logger.LogInformation("[DEEPGRAM] TurnResumed received (speechStarted channel write attempted)");
                 break;
 
             case "EagerEndOfTurn":
