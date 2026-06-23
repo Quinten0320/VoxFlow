@@ -207,16 +207,23 @@ public class PhoneNumberController(
         }
         else
         {
+            // Fetch registered address SID — required for NL numbers
+            var addressSid = await FetchFirstAddressSidAsync(client);
+
             // Purchase a new number
-            var buyUrl = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/IncomingPhoneNumbers.json";
-            var buyResp = await client.PostAsync(buyUrl, new FormUrlEncodedContent(new Dictionary<string, string>
+            var buyUrl    = $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/IncomingPhoneNumbers.json";
+            var buyFields = new Dictionary<string, string>
             {
                 ["PhoneNumber"]          = request.PhoneNumber,
                 ["VoiceUrl"]             = voiceUrl,
                 ["VoiceMethod"]          = "POST",
                 ["StatusCallback"]       = statusCallback,
                 ["StatusCallbackMethod"] = "POST",
-            }));
+            };
+            if (addressSid != null)
+                buyFields["AddressSid"] = addressSid;
+
+            var buyResp = await client.PostAsync(buyUrl, new FormUrlEncodedContent(buyFields));
 
             var buyBody = await buyResp.Content.ReadAsStringAsync();
             if (!buyResp.IsSuccessStatusCode)
@@ -259,5 +266,18 @@ public class PhoneNumberController(
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Basic", credentials);
         return client;
+    }
+
+    private async Task<string?> FetchFirstAddressSidAsync(HttpClient client)
+    {
+        try
+        {
+            var resp = await client.GetAsync(
+                $"{TwilioRestBase}/2010-04-01/Accounts/{_twilio.AccountSid}/Addresses.json?PageSize=1");
+            if (!resp.IsSuccessStatusCode) return null;
+            var body = await resp.Content.ReadAsStringAsync();
+            return JsonNode.Parse(body)?["addresses"]?[0]?["sid"]?.GetValue<string>();
+        }
+        catch { return null; }
     }
 }
