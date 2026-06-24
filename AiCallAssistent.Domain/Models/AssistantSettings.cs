@@ -51,6 +51,17 @@ public class AssistantSettings
     [Column("whatsapp_phone_number")]
     public string? WhatsAppPhoneNumber { get; set; }
 
+    /// <summary>True when the company has requested WhatsApp activation (admin still needs to register the number with Meta).</summary>
+    [Column("whatsapp_requested")]
+    public bool WhatsAppRequested { get; set; } = false;
+
+    [Column("whatsapp_requested_at")]
+    public DateTimeOffset? WhatsAppRequestedAt { get; set; }
+
+    /// <summary>True once the admin has confirmed the number is registered with Meta and activated WhatsApp for this company.</summary>
+    [Column("whatsapp_active")]
+    public bool WhatsAppActive { get; set; } = false;
+
     [Column("tone")]
     public string? Tone { get; set; }
 

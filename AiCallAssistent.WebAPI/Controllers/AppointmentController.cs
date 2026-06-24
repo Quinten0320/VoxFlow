@@ -201,12 +201,14 @@ public class AppointmentController(AppDbContext db, IWhatsAppService whatsApp) :
             .Select(c => c.CompanyName)
             .FirstOrDefaultAsync() ?? "ons bedrijf";
 
-        await whatsApp.SendAppointmentReminderAsync(
-            request.PhoneNumber,
-            displayName,
-            appt.StartTime,
-            appt.EmployeeName,
-            companyName);
+        var nl = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(appt.StartTime);
+        var msg =
+            $"⏰ Herinnering: morgen heeft u een afspraak bij {companyName}!\n\n" +
+            $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+            $"💇 {displayName}\n" +
+            $"👤 {appt.EmployeeName}";
+
+        await whatsApp.SendForCompanyAsync(companyId, request.PhoneNumber, msg, "reminder");
 
         return NoContent();
     }

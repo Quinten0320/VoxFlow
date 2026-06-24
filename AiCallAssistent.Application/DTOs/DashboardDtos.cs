@@ -194,6 +194,15 @@ public record UpdateAssistantSettingsRequest(
 
 public record WhatsAppConnectRequest(string PhoneNumber);
 
+public record WhatsAppStatusDto(bool Requested, bool Active, string? PhoneNumber);
+
+public record AdminWhatsAppRequestDto(
+    short CompanyId,
+    string CompanyName,
+    string? AiPhoneNumber,
+    bool Active,
+    DateTimeOffset? RequestedAt);
+
 public record PhoneNumberDto(
     long PhoneNumberId,
     string AiPhoneNumber,

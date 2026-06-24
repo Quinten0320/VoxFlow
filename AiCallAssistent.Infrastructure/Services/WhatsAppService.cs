@@ -1,6 +1,9 @@
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.Helpers;
 using AiCallAssistent.Application.Services;
+using AiCallAssistent.Domain.Models;
+using AiCallAssistent.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -9,9 +12,10 @@ namespace AiCallAssistent.Infrastructure.Services;
 public class WhatsAppService(
     IHttpClientFactory httpClientFactory,
     IOptions<TwilioSettings> twilioSettings,
-    ILogger<WhatsAppService> logger) : IWhatsAppService
+    ILogger<WhatsAppService> logger,
+    AppDbContext db) : IWhatsAppService
 {
-    public async Task SendAsync(string toNumber, string message, string? fromNumber = null)
+    private async Task SendAsync(string toNumber, string message, string? fromNumber = null)
     {
         var settings = twilioSettings.Value;
         var sender = fromNumber ?? settings.WhatsAppFrom;
@@ -48,7 +52,7 @@ public class WhatsAppService(
         }
     }
 
-    public async Task SendAppointmentConfirmationAsync(
+    private async Task SendAppointmentConfirmationAsync(
         string toNumber, string displayName, DateTimeOffset startTime, string employeeName,
         string? fromNumber = null)
     {
@@ -63,7 +67,7 @@ public class WhatsAppService(
         await SendAsync(toNumber, msg, fromNumber);
     }
 
-    public async Task SendAppointmentReminderAsync(
+    private async Task SendAppointmentReminderAsync(
         string toNumber, string displayName, DateTimeOffset startTime,
         string employeeName, string companyName, string? fromNumber = null)
     {
@@ -77,7 +81,7 @@ public class WhatsAppService(
         await SendAsync(toNumber, msg, fromNumber);
     }
 
-    public async Task SendCallbackConfirmationAsync(
+    private async Task SendCallbackConfirmationAsync(
         string toNumber, string callerName, DateTimeOffset scheduledFrom, DateTimeOffset scheduledUntil,
         string? fromNumber = null)
     {
@@ -91,12 +95,12 @@ public class WhatsAppService(
         await SendAsync(toNumber, msg, fromNumber);
     }
 
-    public Task SendAppointmentDayReminderAsync(
+    private Task SendAppointmentDayReminderAsync(
         string toNumber, string displayName, DateTimeOffset startTime,
         string employeeName, string companyName, string? fromNumber = null)
         => SendAppointmentReminderAsync(toNumber, displayName, startTime, employeeName, companyName, fromNumber);
 
-    public async Task SendAppointmentFollowupAsync(
+    private async Task SendAppointmentFollowupAsync(
         string toNumber, string displayName, string companyName, string? fromNumber = null)
     {
         var msg =
@@ -104,5 +108,47 @@ public class WhatsAppService(
             $"We hopen dat uw {displayName} naar wens was. Tot de volgende keer!";
 
         await SendAsync(toNumber, msg, fromNumber);
+    }
+
+    public async Task SendForCompanyAsync(short companyId, string toNumber, string message, string messageType)
+    {
+        var settings = await db.AssistantSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.CompanyId == companyId);
+
+        if (settings is null || !settings.WhatsAppActive)
+        {
+            logger.LogDebug("WhatsApp skipped for company {CompanyId} — not active", companyId);
+            return;
+        }
+
+        var pkg = await db.CompanyPackages
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.CompanyId == companyId);
+
+        if (pkg?.MaxWhatsAppPerMonth is not null)
+        {
+            var monthStart = new DateTimeOffset(DateTimeOffset.UtcNow.Year, DateTimeOffset.UtcNow.Month, 1, 0, 0, 0, TimeSpan.Zero);
+            var sentThisMonth = await db.WhatsAppMessageLogs
+                .CountAsync(l => l.CompanyId == companyId && l.SentAt >= monthStart);
+
+            if (sentThisMonth >= pkg.MaxWhatsAppPerMonth.Value)
+            {
+                logger.LogWarning("WhatsApp quota exceeded for company {CompanyId} ({Count}/{Limit})",
+                    companyId, sentThisMonth, pkg.MaxWhatsAppPerMonth.Value);
+                return;
+            }
+        }
+
+        await SendAsync(toNumber, message, settings.WhatsAppPhoneNumber);
+
+        db.WhatsAppMessageLogs.Add(new WhatsAppMessageLog
+        {
+            CompanyId   = companyId,
+            MessageType = messageType,
+            ToNumber    = toNumber,
+            SentAt      = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
     }
 }

@@ -28,6 +28,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CompanyRequest> CompanyRequests => Set<CompanyRequest>();
     public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
     public DbSet<EmailJob> EmailJobs => Set<EmailJob>();
+    public DbSet<WhatsAppMessageLog> WhatsAppMessageLogs => Set<WhatsAppMessageLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

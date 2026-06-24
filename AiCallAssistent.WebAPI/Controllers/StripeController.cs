@@ -222,6 +222,7 @@ public class StripeController(
         pkg.CurrentPeriodEnd     = periodEnd;
         pkg.PlanName             = planId;
         pkg.BillingInterval      = interval;
+        pkg.MaxWhatsAppPerMonth  = WhatsAppLimitForPlan(planId);
         pkg.UpdatedAt            = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();
@@ -285,8 +286,9 @@ public class StripeController(
             var (planId, interval) = ResolvePlanFromPriceId(priceId);
             if (planId != null)
             {
-                pkg.PlanName        = planId;
-                pkg.BillingInterval = interval;
+                pkg.PlanName             = planId;
+                pkg.BillingInterval      = interval;
+                pkg.MaxWhatsAppPerMonth  = WhatsAppLimitForPlan(planId);
             }
         }
 
@@ -462,6 +464,14 @@ public class StripeController(
         if (priceId == _stripe.GroeiYearlyPriceId)  return ("Groei", "yearly");
         return (null, null);
     }
+
+    private static int? WhatsAppLimitForPlan(string? planId) => planId switch
+    {
+        "Start" => 15,
+        "Basis" => 50,
+        "Groei" => 100,
+        _       => null,
+    };
 }
 
 public record CreateCheckoutSessionRequest(string PlanId, string Interval, string? ReferralCode, string? FrontendOrigin);

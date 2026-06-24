@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 
 namespace AiCallAssistent.WebAPI.Controllers;
 
@@ -25,7 +26,9 @@ public class IntegrationsController(
     IMemoryCache cache,
     ILogger<IntegrationsController> logger,
     EmailSender emailSender,
-    EmailTemplateService emailTemplates) : DashboardControllerBase(db)
+    EmailTemplateService emailTemplates,
+    IEmailService emailService,
+    IConfiguration configuration) : DashboardControllerBase(db)
 {
     private static readonly string[] Scopes = ["Calendars.ReadWrite", "offline_access", "User.Read"];
 
@@ -308,22 +311,30 @@ public class IntegrationsController(
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var phoneNumber = await Db.AssistantSettings
+        var row = await Db.AssistantSettings
             .Where(s => s.CompanyId == companyId)
-            .Select(s => s.WhatsAppPhoneNumber)
+            .Select(s => new { s.WhatsAppRequested, s.WhatsAppActive, s.WhatsAppPhoneNumber })
             .FirstOrDefaultAsync();
 
-        return Ok(new { connected = !string.IsNullOrWhiteSpace(phoneNumber), phoneNumber });
+        if (row is null)
+            return Ok(new WhatsAppStatusDto(false, false, null));
+
+        return Ok(new WhatsAppStatusDto(row.WhatsAppRequested, row.WhatsAppActive, row.WhatsAppPhoneNumber));
     }
 
-    [HttpPut("whatsapp/connect")]
-    public async Task<IActionResult> WhatsAppConnect([FromBody] WhatsAppConnectRequest request)
+    [HttpPost("whatsapp/request")]
+    public async Task<IActionResult> WhatsAppRequest()
     {
-        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
-            return BadRequest(new { error = "PhoneNumber is required." });
-
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
+
+        var aiPhoneNumber = await Db.PhoneNumbers
+            .Where(p => p.CompanyId == companyId && p.IsActive)
+            .Select(p => p.AiPhoneNumber)
+            .FirstOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(aiPhoneNumber))
+            return BadRequest(new { error = "Koop eerst een telefoonnummer voordat je WhatsApp activeert." });
 
         var settings = await Db.AssistantSettings.FindAsync(companyId);
         if (settings == null)
@@ -332,11 +343,29 @@ public class IntegrationsController(
             Db.AssistantSettings.Add(settings);
         }
 
-        settings.WhatsAppPhoneNumber = request.PhoneNumber.Trim();
+        if (settings.WhatsAppActive)
+            return BadRequest(new { error = "WhatsApp is al actief voor dit bedrijf." });
+
+        settings.WhatsAppRequested = true;
+        settings.WhatsAppRequestedAt = DateTimeOffset.UtcNow;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await Db.SaveChangesAsync();
 
-        return Ok(new { connected = true, phoneNumber = settings.WhatsAppPhoneNumber });
+        // Notify admin
+        var company = await Db.Companies.FindAsync(companyId);
+        var companyName = company?.CompanyName ?? $"Bedrijf {companyId}";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var adminEmail = configuration["AdminEmail"] ?? "quintenwit41@gmail.com";
+                var (subject, html) = emailTemplates.WhatsAppRequestedAdmin(companyName, companyId, aiPhoneNumber);
+                await emailService.SendAsync(adminEmail, "VoxFlow Admin", subject, html);
+            }
+            catch { }
+        });
+
+        return Ok(new { requested = true });
     }
 
     [HttpDelete("whatsapp/disconnect")]
@@ -350,6 +379,9 @@ public class IntegrationsController(
             return NotFound(new { error = "No assistant settings found for this company." });
 
         settings.WhatsAppPhoneNumber = null;
+        settings.WhatsAppActive = false;
+        settings.WhatsAppRequested = false;
+        settings.WhatsAppRequestedAt = null;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await Db.SaveChangesAsync();
 

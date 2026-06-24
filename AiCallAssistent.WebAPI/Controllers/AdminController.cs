@@ -1,5 +1,8 @@
 using AiCallAssistent.Application.Configuration;
+using AiCallAssistent.Application.DTOs;
+using AiCallAssistent.Application.Services;
 using AiCallAssistent.Infrastructure.Data;
+using AiCallAssistent.Infrastructure.Services.Email;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -14,7 +17,9 @@ namespace AiCallAssistent.WebAPI.Controllers;
 public class AdminController(
     AppDbContext db,
     IMemoryCache cache,
-    IOptions<AdminSettings> adminOptions) : ControllerBase
+    IOptions<AdminSettings> adminOptions,
+    EmailSender emailSender,
+    EmailTemplateService emailTemplates) : ControllerBase
 {
     private const string TokenCachePrefix = "admin_token_";
     private const string TokenHeader = "X-Admin-Token";
@@ -265,6 +270,77 @@ public class AdminController(
         request.Status = body.Status;
         await db.SaveChangesAsync();
         return NoContent();
+    }
+
+    // ── WhatsApp ──────────────────────────────────────────────────────────────
+
+    [HttpGet("whatsapp")]
+    public async Task<IActionResult> GetWhatsAppRequests()
+    {
+        if (!IsAuthorized(out var err)) return err!;
+
+        var rows = await db.AssistantSettings
+            .Where(s => s.WhatsAppRequested || s.WhatsAppActive)
+            .Join(db.Companies, s => s.CompanyId, c => c.CompanyId, (s, c) => new { s, c })
+            .GroupJoin(
+                db.PhoneNumbers.Where(p => p.IsActive),
+                sc => sc.s.CompanyId,
+                p => p.CompanyId,
+                (sc, phones) => new { sc.s, sc.c, phones })
+            .SelectMany(x => x.phones.DefaultIfEmpty(), (x, p) => new AdminWhatsAppRequestDto(
+                x.s.CompanyId,
+                x.c.CompanyName,
+                p != null ? p.AiPhoneNumber : x.s.WhatsAppPhoneNumber,
+                x.s.WhatsAppActive,
+                x.s.WhatsAppRequestedAt))
+            .ToListAsync();
+
+        return Ok(rows);
+    }
+
+    [HttpPost("companies/{id:int}/whatsapp/activate")]
+    public async Task<IActionResult> ActivateWhatsApp(int id)
+    {
+        if (!IsAuthorized(out var err)) return err!;
+
+        var companyId = (short)id;
+
+        var aiPhoneNumber = await db.PhoneNumbers
+            .Where(p => p.CompanyId == companyId && p.IsActive)
+            .Select(p => p.AiPhoneNumber)
+            .FirstOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(aiPhoneNumber))
+            return BadRequest(new { error = "Geen actief telefoonnummer gevonden voor dit bedrijf." });
+
+        var settings = await db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+            return NotFound(new { error = "Geen assistent-instellingen gevonden voor dit bedrijf." });
+
+        settings.WhatsAppActive = true;
+        settings.WhatsAppPhoneNumber = aiPhoneNumber;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        // Send confirmation email to company owner
+        var owner = await db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null);
+
+        if (owner?.Email != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (subject, html) = emailTemplates.WhatsAppActivated(owner.Name, aiPhoneNumber);
+                    await emailSender.SendNowAsync(companyId, owner.Email, owner.Name,
+                        "whatsapp_activated", subject, html);
+                }
+                catch { }
+            });
+        }
+
+        return Ok(new { activated = true, phoneNumber = aiPhoneNumber });
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

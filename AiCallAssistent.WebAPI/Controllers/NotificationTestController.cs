@@ -24,59 +24,48 @@ public class NotificationTestController(
         if (string.IsNullOrWhiteSpace(to))
             return BadRequest(new { error = "Query param 'to' is required (e.g. +31612345678)" });
 
-        var fromNumber = await db.AssistantSettings
-            .Where(s => s.CompanyId == companyId)
-            .Select(s => s.WhatsAppPhoneNumber)
-            .FirstOrDefaultAsync();
-
         var companyName = await db.Companies
             .Where(c => c.CompanyId == companyId)
             .Select(c => c.CompanyName)
             .FirstOrDefaultAsync() ?? $"Bedrijf {companyId}";
 
         var now = DateTimeOffset.UtcNow;
+        var nl  = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(now.AddDays(1));
 
+        string msg;
+        string messageType;
         switch (type.ToLowerInvariant())
         {
             case "reminder":
-                await whatsApp.SendAppointmentReminderAsync(
-                    to,
-                    displayName: "Testafspraak",
-                    startTime: now.AddDays(1),
-                    employeeName: "Test Medewerker",
-                    companyName: companyName,
-                    fromNumber: fromNumber);
+                msg =
+                    $"⏰ Herinnering: morgen heeft u een afspraak bij {companyName}!\n\n" +
+                    $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+                    $"💇 Testafspraak\n" +
+                    $"👤 Test Medewerker";
+                messageType = "reminder";
                 break;
 
             case "followup":
-                await whatsApp.SendAppointmentFollowupAsync(
-                    to,
-                    displayName: "Testafspraak",
-                    companyName: companyName,
-                    fromNumber: fromNumber);
+                msg = $"😊 Bedankt voor uw bezoek bij {companyName}!\n\nWe hopen dat uw Testafspraak naar wens was. Tot de volgende keer!";
+                messageType = "followup";
                 break;
 
             case "callback":
-                await whatsApp.SendCallbackConfirmationAsync(
-                    to,
-                    callerName: "Testbeller",
-                    scheduledFrom: now.AddHours(2),
-                    scheduledUntil: now.AddHours(4),
-                    fromNumber: fromNumber);
+                var fromNl  = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(now.AddHours(2));
+                var untilNl = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(now.AddHours(4));
+                msg =
+                    $"📞 Terugbelverzoek ontvangen, Testbeller!\n\n" +
+                    $"Wij bellen u terug op {fromNl:dddd d MMMM} tussen {fromNl:HH:mm} en {untilNl:HH:mm}.\n\n" +
+                    $"Staat u ergens anders voor open? Bel ons dan even.";
+                messageType = "callback";
                 break;
 
             default:
                 return BadRequest(new { error = "type must be 'reminder', 'followup', or 'callback'" });
         }
 
-        return Ok(new
-        {
-            sent = true,
-            to,
-            type,
-            from = fromNumber ?? "(global Twilio default)",
-            companyId,
-            companyName
-        });
+        await whatsApp.SendForCompanyAsync(companyId, to, msg, messageType);
+
+        return Ok(new { sent = true, to, type, companyId, companyName });
     }
 }

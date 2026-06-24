@@ -3,27 +3,10 @@ namespace AiCallAssistent.Application.Services;
 public interface IWhatsAppService
 {
     /// <summary>
-    /// Sends a WhatsApp message via Twilio. Never throws — failures are logged and swallowed.
-    /// No-ops if Twilio:WhatsAppFrom is not configured.
+    /// Company-aware send: checks WhatsAppActive flag, enforces MaxWhatsAppPerMonth quota,
+    /// resolves from-number from AssistantSettings, and logs to whatsapp_message_log.
+    /// No-ops silently if WhatsApp is not active or quota is exceeded.
+    /// This is the only method callers outside WhatsAppService should use.
     /// </summary>
-    Task SendAsync(string toNumber, string message, string? fromNumber = null);
-
-    Task SendAppointmentConfirmationAsync(
-        string toNumber, string displayName, DateTimeOffset startTime, string employeeName,
-        string? fromNumber = null);
-
-    Task SendAppointmentReminderAsync(
-        string toNumber, string displayName, DateTimeOffset startTime,
-        string employeeName, string companyName, string? fromNumber = null);
-
-    Task SendCallbackConfirmationAsync(
-        string toNumber, string callerName, DateTimeOffset scheduledFrom, DateTimeOffset scheduledUntil,
-        string? fromNumber = null);
-
-    Task SendAppointmentDayReminderAsync(
-        string toNumber, string displayName, DateTimeOffset startTime,
-        string employeeName, string companyName, string? fromNumber = null);
-
-    Task SendAppointmentFollowupAsync(
-        string toNumber, string displayName, string companyName, string? fromNumber = null);
+    Task SendForCompanyAsync(short companyId, string toNumber, string message, string messageType);
 }

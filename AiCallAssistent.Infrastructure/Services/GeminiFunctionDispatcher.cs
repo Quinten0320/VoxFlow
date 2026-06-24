@@ -124,8 +124,14 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         var features = context.Features ?? CompanyFeatures.Default;
         if (features.WhatsAppConfirmation && !string.IsNullOrWhiteSpace(context.CallerNumber))
         {
-            await whatsApp.SendAppointmentConfirmationAsync(
-                context.CallerNumber, result.Type, result.StartTime, result.EmployeeName);
+            var nl = NlTimeZone.ConvertFromUtc(result.StartTime);
+            var msg =
+                $"✅ Uw afspraak is bevestigd!\n\n" +
+                $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+                $"💇 {result.Type}\n" +
+                $"👤 {result.EmployeeName}\n\n" +
+                $"Wilt u de afspraak wijzigen? Bel ons dan.";
+            await whatsApp.SendForCompanyAsync(context.CompanyId, context.CallerNumber, msg, "confirmation");
         }
 
         return result;
@@ -227,8 +233,13 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         var features = context.Features ?? CompanyFeatures.Default;
         if (features.WhatsAppConfirmation && !string.IsNullOrWhiteSpace(context.CallerNumber))
         {
-            await whatsApp.SendCallbackConfirmationAsync(
-                context.CallerNumber, callerName, scheduledFrom, scheduledUntil);
+            var fromNl  = NlTimeZone.ConvertFromUtc(scheduledFrom);
+            var untilNl = NlTimeZone.ConvertFromUtc(scheduledUntil);
+            var msg =
+                $"📞 Terugbelverzoek ontvangen, {callerName}!\n\n" +
+                $"Wij bellen u terug op {fromNl:dddd d MMMM} tussen {fromNl:HH:mm} en {untilNl:HH:mm}.\n\n" +
+                $"Staat u ergens anders voor open? Bel ons dan even.";
+            await whatsApp.SendForCompanyAsync(context.CompanyId, context.CallerNumber, msg, "callback");
         }
 
         return new { success = true, callback_request_id = id, message = "Callback request scheduled." };

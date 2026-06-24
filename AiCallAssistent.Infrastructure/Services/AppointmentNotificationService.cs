@@ -81,14 +81,14 @@ public class AppointmentNotificationService(
                 var features = await packageService.GetFeaturesAsync(item.CompanyId);
                 if (!features.WhatsAppReminders) continue;
 
-                var whatsAppFrom = await db.AssistantSettings
-                    .Where(s => s.CompanyId == item.CompanyId)
-                    .Select(s => s.WhatsAppPhoneNumber)
-                    .FirstOrDefaultAsync(ct);
+                var nl = NlTimeZone.ConvertFromUtc(item.StartTime);
+                var msg =
+                    $"⏰ Herinnering: morgen heeft u een afspraak bij {item.CompanyName}!\n\n" +
+                    $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+                    $"💇 {item.DisplayName}\n" +
+                    $"👤 {item.EmployeeName}";
 
-                await whatsApp.SendAppointmentReminderAsync(
-                    item.CallerPhoneNumber, item.DisplayName, item.StartTime,
-                    item.EmployeeName, item.CompanyName, fromNumber: whatsAppFrom);
+                await whatsApp.SendForCompanyAsync(item.CompanyId, item.CallerPhoneNumber, msg, "reminder");
 
                 await db.Appointments
                     .Where(a => a.AppointmentId == item.AppointmentId)
@@ -138,13 +138,11 @@ public class AppointmentNotificationService(
                 var features = await packageService.GetFeaturesAsync(item.CompanyId);
                 if (!features.WhatsAppReminders) continue;
 
-                var whatsAppFrom = await db.AssistantSettings
-                    .Where(s => s.CompanyId == item.CompanyId)
-                    .Select(s => s.WhatsAppPhoneNumber)
-                    .FirstOrDefaultAsync(ct);
+                var msg =
+                    $"😊 Bedankt voor uw bezoek bij {item.CompanyName}!\n\n" +
+                    $"We hopen dat uw {item.DisplayName} naar wens was. Tot de volgende keer!";
 
-                await whatsApp.SendAppointmentFollowupAsync(
-                    item.CallerPhoneNumber, item.DisplayName, item.CompanyName, fromNumber: whatsAppFrom);
+                await whatsApp.SendForCompanyAsync(item.CompanyId, item.CallerPhoneNumber, msg, "followup");
 
                 await db.Appointments
                     .Where(a => a.AppointmentId == item.AppointmentId)

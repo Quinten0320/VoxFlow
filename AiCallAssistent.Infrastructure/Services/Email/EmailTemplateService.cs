@@ -438,4 +438,30 @@ public class EmailTemplateService
             <br>
             {Cta("Deel mijn referrallink", DashboardUrl + "/instellingen")}
             """));
+
+    // ── #56 · WhatsApp geactiveerd (naar bedrijf) ─────────────────────────────
+
+    public (string Subject, string Html) WhatsAppActivated(string naam, string phoneNumber) =>
+        ("WhatsApp Business is nu actief!", Layout(
+            "Uw klanten kunnen nu bereikt worden via WhatsApp.",
+            $"""
+            <h2>WhatsApp Business is actief, {naam}!</h2>
+            <p>Goed nieuws! WhatsApp Business is nu ingeschakeld voor uw VoxFlow-assistent.</p>
+            <p>Uw klanten kunnen voortaan via WhatsApp berichten ontvangen vanaf <strong>{phoneNumber}</strong>.</p>
+            <p>Afspraakbevestigingen, herinneringen en terugbelbevestigingen worden nu automatisch verstuurd.</p>
+            {Cta("Bekijk mijn integraties", DashboardUrl + "/instellingen")}
+            """));
+
+    // ── #57 · WhatsApp aanvraag (intern naar admin) ───────────────────────────
+
+    public (string Subject, string Html) WhatsAppRequestedAdmin(string companyName, short companyId, string phoneNumber) =>
+        ($"WhatsApp-aanvraag: {companyName}", Layout(
+            $"{companyName} wil WhatsApp activeren.",
+            $"""
+            <h2>Nieuwe WhatsApp-aanvraag</h2>
+            <p><strong>Bedrijf:</strong> {companyName} (ID: {companyId})</p>
+            <p><strong>Telefoonnummer:</strong> {phoneNumber}</p>
+            <p>Registreer dit nummer als WhatsApp-sender in de Meta Business Manager en klik daarna op Activeer in het admin panel.</p>
+            {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
+            """));
 }
