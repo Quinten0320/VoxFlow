@@ -56,6 +56,7 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
             Location = request.Location,
             TransferOnRequest = request.TransferOnRequest,
             CallbackOnRequest = request.CallbackOnRequest,
+            TransferOutsideHours = request.TransferOutsideHours,
             IsActive = true
         };
 
@@ -91,6 +92,7 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
         type.IsActive = request.IsActive;
         type.TransferOnRequest = request.TransferOnRequest;
         type.CallbackOnRequest = request.CallbackOnRequest;
+        type.TransferOutsideHours = request.TransferOutsideHours;
         type.Location = request.Location;
 
         await Db.SaveChangesAsync();
@@ -125,6 +127,7 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
         t.IsActive,
         t.TransferOnRequest,
         t.CallbackOnRequest,
+        t.TransferOutsideHours,
         t.AppointmentTypeEmployees.Select(e => e.EmployeeId).ToList(),
         t.Location);
 

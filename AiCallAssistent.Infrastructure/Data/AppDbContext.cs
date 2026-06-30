@@ -32,6 +32,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WhatsAppMessageLog> WhatsAppMessageLogs => Set<WhatsAppMessageLog>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<IntegrationNotifyRequest> IntegrationNotifyRequests => Set<IntegrationNotifyRequest>();
+    public DbSet<AssistantFeedback> AssistantFeedbacks => Set<AssistantFeedback>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -59,6 +60,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<CallSession>(entity =>
         {
             entity.HasIndex(s => new { s.CompanyId, s.CreatedAt });
+            entity.HasIndex(s => new { s.CompanyId, s.StartedAt });
         });
 
         modelBuilder.Entity<CallBlacklist>(entity =>

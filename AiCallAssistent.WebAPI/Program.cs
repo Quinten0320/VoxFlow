@@ -142,8 +142,15 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-if (!app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment())
+{
+    // Don't redirect in dev so http://localhost still works
+}
+else
+{
+    app.UseHsts();
     app.UseHttpsRedirection();
+}
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.Use(async (context, next) =>
 {

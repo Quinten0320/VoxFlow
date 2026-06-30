@@ -52,13 +52,9 @@ public class ReferralController(
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var referred = await Db.CompanyPackages
-            .Where(p => p.ReferredByCompanyId == companyId)
-            .ToListAsync();
-
-        var totalReferred  = referred.Count;
-        var totalConverted = referred.Count(p => p.SubscriptionStatus == "active");
-        var totalRewarded  = referred.Count(p => p.ReferralRewardedAt != null);
+        var totalReferred  = await Db.CompanyPackages.CountAsync(p => p.ReferredByCompanyId == companyId);
+        var totalConverted = await Db.CompanyPackages.CountAsync(p => p.ReferredByCompanyId == companyId && p.SubscriptionStatus == "active");
+        var totalRewarded  = await Db.CompanyPackages.CountAsync(p => p.ReferredByCompanyId == companyId && p.ReferralRewardedAt != null);
 
         return Ok(new { totalReferred, totalConverted, totalRewarded });
     }

@@ -27,13 +27,17 @@ public class DashboardReportingController(AppDbContext db) : DashboardController
         DateTimeOffset startUtc = range switch
         {
             "vandaag" => NlTimeZone.ToDateTimeOffset(todayNl, TimeOnly.MinValue).ToUniversalTime(),
-            "maand"   => NlTimeZone.ToDateTimeOffset(new DateOnly(todayNl.Year, todayNl.Month, 1), TimeOnly.MinValue).ToUniversalTime(),
-            _         => NlTimeZone.ToDateTimeOffset(todayNl.AddDays(-6), TimeOnly.MinValue).ToUniversalTime()
+            "7d"      => NlTimeZone.ToDateTimeOffset(todayNl.AddDays(-6), TimeOnly.MinValue).ToUniversalTime(),
+            "30d"     => NlTimeZone.ToDateTimeOffset(todayNl.AddDays(-29), TimeOnly.MinValue).ToUniversalTime(),
+            "90d"     => NlTimeZone.ToDateTimeOffset(todayNl.AddDays(-89), TimeOnly.MinValue).ToUniversalTime(),
+            _         => NlTimeZone.ToDateTimeOffset(todayNl.AddDays(-29), TimeOnly.MinValue).ToUniversalTime()
         };
 
-        // Pull raw sessions in window
+        // Pull raw sessions in window — capped at 10 000 rows to prevent memory exhaustion
         var sessions = await Db.CallSessions
             .Where(c => c.CompanyId == companyId && c.StartedAt >= startUtc)
+            .OrderByDescending(c => c.StartedAt)
+            .Take(10_000)
             .Select(c => new
             {
                 c.StartedAt,

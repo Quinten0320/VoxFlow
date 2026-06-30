@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AiCallAssistent.Infrastructure.Data;
 using AiCallAssistent.Infrastructure.Services.Email;
@@ -29,7 +31,7 @@ public class SupabaseWebhookController(
         var expectedSecret = config["SupabaseWebhookSecret"] ?? config["Supabase:WebhookSecret"];
         var receivedSecret = Request.Headers["X-Webhook-Secret"].ToString();
 
-        if (string.IsNullOrEmpty(expectedSecret) || receivedSecret != expectedSecret)
+        if (string.IsNullOrEmpty(expectedSecret) || !SecretEquals(expectedSecret, receivedSecret))
             return Unauthorized(new { error = "Invalid webhook secret" });
 
         var body = await new StreamReader(Request.Body).ReadToEndAsync();
@@ -116,6 +118,14 @@ public class SupabaseWebhookController(
             await emailSender.ScheduleAsync(companyId.Value, "onboarding_reminder",
                 new { }, now.AddDays(3));
         }
+    }
+
+    private static bool SecretEquals(string expected, string received)
+    {
+        var a = Encoding.UTF8.GetBytes(expected);
+        var b = Encoding.UTF8.GetBytes(received);
+        if (a.Length != b.Length) return false;
+        return CryptographicOperations.FixedTimeEquals(a, b);
     }
 
     private async Task HandlePasswordRecovery(string email, string name)

@@ -75,24 +75,41 @@ public class AdminController(
 
         var companies = await db.Companies
             .OrderByDescending(c => c.CreatedAt)
-            .Select(c => new
-            {
-                c.CompanyId,
-                c.CompanyName,
-                c.Branch,
-                c.PackageType,
-                c.IsActive,
-                c.CreatedAt,
-                EmployeeCount = db.Employees.Count(e => e.CompanyId == c.CompanyId),
-                CallCount     = db.CallSessions.Count(s => s.CompanyId == c.CompanyId),
-                PhoneNumbers  = db.PhoneNumbers
-                    .Where(p => p.CompanyId == c.CompanyId)
-                    .Select(p => p.AiPhoneNumber)
-                    .ToList(),
-            })
             .ToListAsync();
 
-        return Ok(companies);
+        var ids = companies.Select(c => c.CompanyId).ToList();
+
+        var employeeCounts = await db.Employees
+            .Where(e => ids.Contains(e.CompanyId))
+            .GroupBy(e => e.CompanyId)
+            .Select(g => new { CompanyId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CompanyId, x => x.Count);
+
+        var callCounts = await db.CallSessions
+            .Where(s => ids.Contains(s.CompanyId))
+            .GroupBy(s => s.CompanyId)
+            .Select(g => new { CompanyId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CompanyId, x => x.Count);
+
+        var phoneLookup = await db.PhoneNumbers
+            .Where(p => ids.Contains(p.CompanyId))
+            .GroupBy(p => p.CompanyId)
+            .ToDictionaryAsync(g => g.Key, g => g.Select(p => p.AiPhoneNumber).ToList());
+
+        var result = companies.Select(c => new
+        {
+            c.CompanyId,
+            c.CompanyName,
+            c.Branch,
+            c.PackageType,
+            c.IsActive,
+            c.CreatedAt,
+            EmployeeCount = employeeCounts.GetValueOrDefault(c.CompanyId),
+            CallCount     = callCounts.GetValueOrDefault(c.CompanyId),
+            PhoneNumbers  = phoneLookup.GetValueOrDefault(c.CompanyId, []),
+        });
+
+        return Ok(result);
     }
 
     // ── Calls ─────────────────────────────────────────────────────────────────
@@ -101,6 +118,7 @@ public class AdminController(
     public async Task<IActionResult> GetCalls([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         if (!IsAuthorized(out var err)) return err!;
+        pageSize = Math.Clamp(pageSize, 1, 500);
 
         var total = await db.CallSessions.CountAsync();
         var calls = await db.CallSessions
@@ -336,7 +354,11 @@ public class AdminController(
                     await emailSender.SendNowAsync(companyId, owner.Email, owner.Name,
                         "whatsapp_activated", subject, html);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Log silently — activation already saved
+                    _ = ex;
+                }
             });
         }
 
@@ -404,11 +426,43 @@ public class AdminController(
                     await emailSender.SendNowAsync(request.CompanyId, owner.Email, owner.Name,
                         "integration_now_live", subject, html);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _ = ex;
+                }
             });
         }
 
         return Ok(new { resolved = true });
+    }
+
+    // ── Feedback ──────────────────────────────────────────────────────────────
+
+    [HttpGet("feedback")]
+    public async Task<IActionResult> GetFeedback([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    {
+        if (!IsAuthorized(out var err)) return err!;
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var total = await db.AssistantFeedbacks.CountAsync();
+        var rows = await db.AssistantFeedbacks
+            .OrderByDescending(f => f.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(f => new
+            {
+                f.Id,
+                f.CompanyId,
+                f.Message,
+                f.CreatedAt,
+                CompanyName = f.CompanyId == null ? null : db.Companies
+                    .Where(c => c.CompanyId == f.CompanyId)
+                    .Select(c => c.CompanyName)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync();
+
+        return Ok(new { total, page, pageSize, rows });
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

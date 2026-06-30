@@ -45,6 +45,7 @@ public class AppointmentService : IAppointmentService
                 WaitTime = t.WaitTime,
                 TransferOnRequest = t.TransferOnRequest,
                 CallbackOnRequest = t.CallbackOnRequest,
+                TransferOutsideHours = t.TransferOutsideHours,
             })
             .ToListAsync();
     }
@@ -54,6 +55,14 @@ public class AppointmentService : IAppointmentService
         var typeConfig = await _db.AppointmentTypes
             .FirstOrDefaultAsync(t => t.CompanyId == request.CompanyId && t.Name == request.Type && t.IsActive)
             ?? throw new ArgumentException($"Afspraaktype '{request.Type}' is niet beschikbaar. Roep get_appointment_types aan om de beschikbare typen op te halen.");
+
+        if (typeConfig.TransferOnRequest)
+            throw new InvalidOperationException(
+                $"'{typeConfig.DisplayName}' wordt altijd doorverbonden naar een medewerker en kan niet worden geboekt. Verbind de beller direct door.");
+
+        if (typeConfig.CallbackOnRequest)
+            throw new InvalidOperationException(
+                $"'{typeConfig.DisplayName}' vereist altijd een terugbelverzoek en kan niet worden geboekt. Roep create_callback_request aan.");
 
         var startNl = NlTimeZone.ConvertFromUtc(request.StartTime);
         var dateNl = DateOnly.FromDateTime(startNl.DateTime);

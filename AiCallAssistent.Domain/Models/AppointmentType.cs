@@ -39,6 +39,10 @@ public class AppointmentType
     [Column("callback_on_request")]
     public bool CallbackOnRequest { get; set; } = false;
 
+    /// <summary>When true the bot may transfer the caller outside opening hours for this appointment type (e.g. urgent cases or on customer request).</summary>
+    [Column("transfer_outside_hours")]
+    public bool TransferOutsideHours { get; set; } = false;
+
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
 

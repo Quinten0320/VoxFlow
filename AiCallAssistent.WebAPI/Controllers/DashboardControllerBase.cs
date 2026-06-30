@@ -139,36 +139,46 @@ public abstract class DashboardControllerBase(AppDbContext db) : ControllerBase
 
         if (emailSender == null || templates == null || employee.Email == null) return;
 
+        var capturedLogger = HttpContext.RequestServices.GetService<ILogger<DashboardControllerBase>>();
+
         // Send new-login alert (non-blocking)
         if (isNewIp)
         {
             var ua       = HttpContext.Request.Headers["User-Agent"].ToString();
             var device   = ua.Length > 80 ? ua[..80] : ua;
             var tijdstip = now.ToString("dd-MM-yyyy HH:mm");
+            var capturedCompanyId = employee.CompanyId;
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var (s, h) = templates.NewLoginDetected(employee.Name, device, ip, tijdstip);
-                    await emailSender.SendNowAsync(employee.CompanyId, employee.Email!, employee.Name,
+                    await emailSender.SendNowAsync(capturedCompanyId, employee.Email!, employee.Name,
                         "new_login", s, h);
                 }
-                catch { /* ignore */ }
+                catch (Exception ex)
+                {
+                    capturedLogger?.LogError(ex, "Failed to send new_login email for company {CompanyId}", capturedCompanyId);
+                }
             });
         }
 
         // Re-activation email
         if (wasInactive)
         {
+            var capturedCompanyId2 = employee.CompanyId;
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var (s, h) = templates.ReActivated(employee.Name);
-                    await emailSender.SendNowAsync(employee.CompanyId, employee.Email!, employee.Name,
+                    await emailSender.SendNowAsync(capturedCompanyId2, employee.Email!, employee.Name,
                         "re_activated", s, h);
                 }
-                catch { /* ignore */ }
+                catch (Exception ex)
+                {
+                    capturedLogger?.LogError(ex, "Failed to send re_activated email for company {CompanyId}", capturedCompanyId2);
+                }
             });
         }
     }

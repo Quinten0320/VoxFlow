@@ -8,7 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace AiCallAssistent.WebAPI.Controllers;
 
 [Route("api/employees")]
-public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailTemplateService templates)
+public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailTemplateService templates,
+    ILogger<EmployeeController> logger)
     : DashboardControllerBase(db)
 {
     /// <summary>Returns all employees for the company.</summary>
@@ -127,15 +128,22 @@ public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailT
         if (employee.Email != null)
         {
             var company = await Db.Companies.FindAsync(companyId);
+            var capturedCompanyId = companyId;
+            var capturedEmail = employee.Email;
+            var capturedName = employee.Name;
+            var capturedCompanyName = company?.CompanyName ?? "VoxFlow";
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var (s, h) = templates.TeamMemberRemoved(employee.Name, company?.CompanyName ?? "VoxFlow");
-                    await emailSender.SendNowAsync(companyId, employee.Email, employee.Name,
+                    var (s, h) = templates.TeamMemberRemoved(capturedName, capturedCompanyName);
+                    await emailSender.SendNowAsync(capturedCompanyId, capturedEmail, capturedName,
                         "team_member_removed", s, h);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to send team_member_removed email for company {CompanyId}", capturedCompanyId);
+                }
             });
         }
 

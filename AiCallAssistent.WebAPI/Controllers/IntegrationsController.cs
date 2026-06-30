@@ -182,15 +182,21 @@ public class IntegrationsController(
             .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null);
         if (ownerEmp?.Email != null)
         {
+            var capturedCompanyId = companyId;
+            var capturedOwnerEmail = ownerEmp.Email;
+            var capturedOwnerName = ownerEmp.Name;
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var (s, h) = emailTemplates.IntegrationConnected(ownerEmp.Name, "Microsoft Outlook");
-                    await emailSender.SendNowAsync(companyId, ownerEmp.Email, ownerEmp.Name,
+                    var (s, h) = emailTemplates.IntegrationConnected(capturedOwnerName, "Microsoft Outlook");
+                    await emailSender.SendNowAsync(capturedCompanyId, capturedOwnerEmail, capturedOwnerName,
                         "integration_connected", s, h);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to send integration_connected email for company {CompanyId}", capturedCompanyId);
+                }
             });
         }
 
@@ -387,15 +393,21 @@ public class IntegrationsController(
         // Notify admin
         var company = await Db.Companies.FindAsync(companyId);
         var companyName = company?.CompanyName ?? $"Bedrijf {companyId}";
+        var capturedCompanyId = companyId;
+        var capturedCompanyName = companyName;
+        var capturedAiPhone = aiPhoneNumber;
         _ = Task.Run(async () =>
         {
             try
             {
                 var adminEmail = configuration["AdminEmail"] ?? "quintenwit41@gmail.com";
-                var (subject, html) = emailTemplates.WhatsAppRequestedAdmin(companyName, companyId, aiPhoneNumber);
+                var (subject, html) = emailTemplates.WhatsAppRequestedAdmin(capturedCompanyName, capturedCompanyId, capturedAiPhone);
                 await emailSender.SendNowAsync(null, adminEmail, "VoxFlow Admin", "whatsapp_requested_admin", subject, html);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send whatsapp_requested_admin email for company {CompanyId}", capturedCompanyId);
+            }
         });
 
         return Ok(new { requested = true });
@@ -465,22 +477,31 @@ public class IntegrationsController(
             .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null);
         var company = await Db.Companies.FindAsync(companyId);
 
+        var capturedCompanyId2 = companyId;
+        var capturedOwnerEmail2 = owner?.Email;
+        var capturedOwnerName2 = owner?.Name;
+        var capturedCompanyName2 = company?.CompanyName ?? $"Bedrijf {companyId}";
+        var capturedIntegrationKey = body.IntegrationKey;
+        var capturedIntegrationName = body.IntegrationName;
         _ = Task.Run(async () =>
         {
             try
             {
-                if (owner?.Email != null)
+                if (capturedOwnerEmail2 != null)
                 {
-                    var (s, h) = emailTemplates.IntegrationNotifyConfirm(owner.Name, body.IntegrationName);
-                    await emailSender.SendNowAsync(companyId, owner.Email, owner.Name,
+                    var (s, h) = emailTemplates.IntegrationNotifyConfirm(capturedOwnerName2!, capturedIntegrationName);
+                    await emailSender.SendNowAsync(capturedCompanyId2, capturedOwnerEmail2, capturedOwnerName2!,
                         "integration_notify_confirm", s, h);
                 }
                 var adminEmail = configuration["AdminEmail"] ?? "quintenwit41@gmail.com";
-                var (as_, ah) = emailTemplates.IntegrationNotifyAdmin(
-                    company?.CompanyName ?? $"Bedrijf {companyId}", companyId, body.IntegrationName);
+                var (as_, ah) = emailTemplates.IntegrationNotifyAdmin(capturedCompanyName2, capturedCompanyId2, capturedIntegrationName);
                 await emailSender.SendNowAsync(null, adminEmail, "VoxFlow Admin", "integration_notify_admin", as_, ah);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send integration notify emails for company {CompanyId} integration {Key}",
+                    capturedCompanyId2, capturedIntegrationKey);
+            }
         });
 
         return Ok(new { subscribed = true });

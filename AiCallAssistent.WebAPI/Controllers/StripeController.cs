@@ -15,7 +15,8 @@ public class StripeController(
     AppDbContext db,
     IOptions<StripeSettings> stripeOptions,
     EmailSender emailSender,
-    EmailTemplateService emailTemplates) : DashboardControllerBase(db)
+    EmailTemplateService emailTemplates,
+    ILogger<StripeController> logger) : DashboardControllerBase(db)
 {
     private readonly StripeSettings _stripe = stripeOptions.Value;
 
@@ -92,8 +93,9 @@ public class StripeController(
         {
             stripeEvent = EventUtility.ConstructEvent(payload, sigHeader, _stripe.WebhookSecret);
         }
-        catch (StripeException)
+        catch (Exception ex)
         {
+            logger.LogWarning(ex, "Stripe webhook validation failed");
             return BadRequest(new { error = "Invalid webhook signature" });
         }
 
@@ -374,6 +376,7 @@ public class StripeController(
                     .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive);
                 if (referrerOwner?.Email != null && referredOwner != null)
                 {
+                    var capturedLogger = logger;
                     _ = Task.Run(async () =>
                     {
                         try
@@ -383,7 +386,10 @@ public class StripeController(
                             await emailSender.SendNowAsync(referrerPkg.CompanyId,
                                 referrerOwner.Email, referrerOwner.Name, "referral_success", s, h);
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            capturedLogger.LogError(ex, "Failed to send referral_success email to company {CompanyId}", referrerPkg.CompanyId);
+                        }
                     });
                 }
             }
@@ -445,6 +451,8 @@ public class StripeController(
             && pkg.StripeCustomerId is { Length: > 0 }
             && subscription.Status is "active" or "trialing")
         {
+            var capturedLogger = logger;
+            var capturedCompanyId = pkg.CompanyId;
             _ = Task.Run(async () =>
             {
                 try
@@ -452,7 +460,10 @@ public class StripeController(
                     await BillOverageAsync(pkg.CompanyId, pkg.StripeCustomerId!,
                         pkg.MaxCallMinutes!.Value, pkg.BillingInterval, pkg.PlanName, oldPeriodEnd!.Value);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    capturedLogger.LogError(ex, "Overage billing failed for company {CompanyId}", capturedCompanyId);
+                }
             });
         }
     }
@@ -533,6 +544,8 @@ public class StripeController(
 
         // #13 SubscriptionCancelled
         var eindDatum = (pkg.CurrentPeriodEnd ?? DateTimeOffset.UtcNow).ToString("dd-MM-yyyy");
+        var capturedLogger1 = logger;
+        var capturedCompanyId1 = pkg.CompanyId;
         _ = Task.Run(async () =>
         {
             try
@@ -541,7 +554,10 @@ public class StripeController(
                 await emailSender.SendNowAsync(pkg.CompanyId, owner.Email, owner.Name,
                     "subscription_cancelled", s, h);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                capturedLogger1.LogError(ex, "Failed to send subscription_cancelled email to company {CompanyId}", capturedCompanyId1);
+            }
         });
 
         // Schedule win-back sequence
@@ -578,6 +594,8 @@ public class StripeController(
             var startdatum     = DateTimeOffset.UtcNow.ToString("dd-MM-yyyy");
             var volgendeFactuur = (pkg.CurrentPeriodEnd ?? DateTimeOffset.UtcNow.AddMonths(1))
                                     .ToString("dd-MM-yyyy");
+            var capturedLogger2 = logger;
+            var capturedCompanyId2 = pkg.CompanyId;
             _ = Task.Run(async () =>
             {
                 try
@@ -587,7 +605,10 @@ public class StripeController(
                     await emailSender.SendNowAsync(pkg.CompanyId, owner.Email!, owner.Name,
                         "subscription_started", s, h);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    capturedLogger2.LogError(ex, "Failed to send subscription_started email to company {CompanyId}", capturedCompanyId2);
+                }
             });
         }
 
@@ -649,6 +670,8 @@ public class StripeController(
         {
             var beloningBedrag = (Math.Abs(creditCents) / 100m)
                 .ToString("€#,##0.00", System.Globalization.CultureInfo.GetCultureInfo("nl-NL"));
+            var capturedLogger3 = logger;
+            var capturedCompanyId3 = referrer.CompanyId;
             _ = Task.Run(async () =>
             {
                 try
@@ -657,7 +680,10 @@ public class StripeController(
                     await emailSender.SendNowAsync(referrer.CompanyId, referrerOwner.Email!,
                         referrerOwner.Name, "referral_rewarded", s, h);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    capturedLogger3.LogError(ex, "Failed to send referral_rewarded email to company {CompanyId}", capturedCompanyId3);
+                }
             });
         }
     }

@@ -35,6 +35,7 @@ public record AppointmentTypeListDto(
     bool IsActive,
     bool TransferOnRequest,
     bool CallbackOnRequest,
+    bool TransferOutsideHours,
     List<long> EmployeeIds,
     string? Location);
 
@@ -46,7 +47,8 @@ public record CreateAppointmentTypeRequest(
     List<long>? EmployeeIds = null,
     string? Location = null,
     bool TransferOnRequest = false,
-    bool CallbackOnRequest = false);
+    bool CallbackOnRequest = false,
+    bool TransferOutsideHours = false);
 
 public record UpdateAppointmentTypeRequest(
     string Name,
@@ -56,6 +58,7 @@ public record UpdateAppointmentTypeRequest(
     bool IsActive,
     bool TransferOnRequest = false,
     bool CallbackOnRequest = false,
+    bool TransferOutsideHours = false,
     List<long>? EmployeeIds = null,
     string? Location = null);
 
