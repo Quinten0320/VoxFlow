@@ -20,6 +20,7 @@ public class PackageController(AppDbContext db) : DashboardControllerBase(db)
             .Select(p => new CompanyPackageDto(
                 p.MaxCallMinutes,
                 p.MaxWhatsAppPerMonth,
+                p.AllowOverage,
                 p.FeatureBlacklist,
                 p.FeatureCallbackRequests,
                 p.FeatureWhatsAppConfirmation,
@@ -38,6 +39,7 @@ public class PackageController(AppDbContext db) : DashboardControllerBase(db)
             return Ok(new CompanyPackageDto(
                 MaxCallMinutes: null,
                 MaxWhatsAppPerMonth: null,
+                AllowOverage: true,
                 FeatureBlacklist: true,
                 FeatureCallbackRequests: true,
                 FeatureWhatsAppConfirmation: true,
@@ -68,6 +70,7 @@ public class PackageController(AppDbContext db) : DashboardControllerBase(db)
 
         pkg.MaxCallMinutes             = request.MaxCallMinutes;
         pkg.MaxWhatsAppPerMonth        = request.MaxWhatsAppPerMonth;
+        pkg.AllowOverage               = request.AllowOverage;
         pkg.FeatureBlacklist           = request.FeatureBlacklist;
         pkg.FeatureCallbackRequests    = request.FeatureCallbackRequests;
         pkg.FeatureWhatsAppConfirmation = request.FeatureWhatsAppConfirmation;

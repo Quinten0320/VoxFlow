@@ -78,6 +78,27 @@ public abstract class DashboardControllerBase(AppDbContext db) : ControllerBase
             : null;
     }
 
+    /// <summary>
+    /// Writes a non-critical audit log entry (actor from JWT email claim).
+    /// Call AFTER the main SaveChangesAsync so there are no pending-change conflicts.
+    /// </summary>
+    protected async Task LogAuditAsync(short companyId, string action)
+    {
+        try
+        {
+            var actorEmail = User.FindFirst("email")?.Value ?? "systeem";
+            Db.AuditLogs.Add(new AiCallAssistent.Domain.Models.AuditLog
+            {
+                CompanyId  = companyId,
+                ActorEmail = actorEmail,
+                Action     = action,
+                CreatedAt  = DateTimeOffset.UtcNow,
+            });
+            await Db.SaveChangesAsync();
+        }
+        catch { /* audit log is non-critical — never fail the request */ }
+    }
+
     private async Task TrackLoginAsync(Employee employee, string? email,
                                        EmailSender? emailSender, EmailTemplateService? templates)
     {

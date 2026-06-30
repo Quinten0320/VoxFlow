@@ -343,6 +343,74 @@ public class AdminController(
         return Ok(new { activated = true, phoneNumber = aiPhoneNumber });
     }
 
+    // ── Integration notify requests ───────────────────────────────────────────
+
+    [HttpGet("integration-requests")]
+    public async Task<IActionResult> GetIntegrationRequests()
+    {
+        if (!IsAuthorized(out var err)) return err!;
+
+        var rows = await db.IntegrationNotifyRequests
+            .Where(r => !r.Resolved)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new
+            {
+                r.Id,
+                r.CompanyId,
+                r.IntegrationKey,
+                r.IntegrationName,
+                r.CreatedAt,
+                CompanyName = db.Companies
+                    .Where(c => c.CompanyId == r.CompanyId)
+                    .Select(c => c.CompanyName)
+                    .FirstOrDefault(),
+                OwnerEmail = db.Employees
+                    .Where(e => e.CompanyId == r.CompanyId && e.IsOwner && e.IsActive && e.Email != null)
+                    .Select(e => e.Email)
+                    .FirstOrDefault(),
+                OwnerName = db.Employees
+                    .Where(e => e.CompanyId == r.CompanyId && e.IsOwner && e.IsActive)
+                    .Select(e => e.Name)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync();
+
+        return Ok(rows);
+    }
+
+    [HttpPost("integration-requests/{id:long}/resolve")]
+    public async Task<IActionResult> ResolveIntegrationRequest(long id)
+    {
+        if (!IsAuthorized(out var err)) return err!;
+
+        var request = await db.IntegrationNotifyRequests.FindAsync(id);
+        if (request == null) return NotFound();
+
+        request.Resolved = true;
+        request.ResolvedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        // Send "now live" email to owner
+        var owner = await db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == request.CompanyId && e.IsOwner && e.IsActive && e.Email != null);
+
+        if (owner?.Email != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (subject, html) = emailTemplates.IntegrationNowLive(owner.Name, request.IntegrationName);
+                    await emailSender.SendNowAsync(request.CompanyId, owner.Email, owner.Name,
+                        "integration_now_live", subject, html);
+                }
+                catch { }
+            });
+        }
+
+        return Ok(new { resolved = true });
+    }
+
     // ── Helper ────────────────────────────────────────────────────────────────
 
     private bool IsAuthorized(out IActionResult? result)

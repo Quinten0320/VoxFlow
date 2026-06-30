@@ -111,4 +111,8 @@ public class AssistantSettings
 
     [Column("behavior_instructions")]
     public string? BehaviorInstructions { get; set; }
+
+    /// <summary>Maximum number of appointments per calendar day. Null or 0 = unlimited.</summary>
+    [Column("max_appointments_per_day")]
+    public int? MaxAppointmentsPerDay { get; set; }
 }

@@ -33,14 +33,20 @@ public record AppointmentTypeListDto(
     int DurationMinutes,
     short WaitTime,
     bool IsActive,
-    bool AutoTransferEnabled,
-    long? AutoTransferDepartmentId);
+    bool TransferOnRequest,
+    bool CallbackOnRequest,
+    List<long> EmployeeIds,
+    string? Location);
 
 public record CreateAppointmentTypeRequest(
     string Name,
     string DisplayName,
     int DurationMinutes,
-    short WaitTime = 0);
+    short WaitTime = 0,
+    List<long>? EmployeeIds = null,
+    string? Location = null,
+    bool TransferOnRequest = false,
+    bool CallbackOnRequest = false);
 
 public record UpdateAppointmentTypeRequest(
     string Name,
@@ -48,8 +54,10 @@ public record UpdateAppointmentTypeRequest(
     int DurationMinutes,
     short WaitTime,
     bool IsActive,
-    bool AutoTransferEnabled = false,
-    long? AutoTransferDepartmentId = null);
+    bool TransferOnRequest = false,
+    bool CallbackOnRequest = false,
+    List<long>? EmployeeIds = null,
+    string? Location = null);
 
 public record AppointmentDto(
     long AppointmentId,
@@ -267,6 +275,7 @@ public record UpdateCallbackStatusRequest(string Status);
 public record CompanyPackageDto(
     int? MaxCallMinutes,
     int? MaxWhatsAppPerMonth,
+    bool AllowOverage,
     bool FeatureBlacklist,
     bool FeatureCallbackRequests,
     bool FeatureWhatsAppConfirmation,
@@ -280,6 +289,7 @@ public record CompanyPackageDto(
 public record UpsertCompanyPackageRequest(
     int? MaxCallMinutes,
     int? MaxWhatsAppPerMonth,
+    bool AllowOverage,
     bool FeatureBlacklist,
     bool FeatureCallbackRequests,
     bool FeatureWhatsAppConfirmation,

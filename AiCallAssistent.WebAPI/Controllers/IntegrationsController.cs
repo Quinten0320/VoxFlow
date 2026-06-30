@@ -27,7 +27,6 @@ public class IntegrationsController(
     ILogger<IntegrationsController> logger,
     EmailSender emailSender,
     EmailTemplateService emailTemplates,
-    IEmailService emailService,
     IConfiguration configuration) : DashboardControllerBase(db)
 {
     private static readonly string[] Scopes = ["Calendars.ReadWrite", "offline_access", "User.Read"];
@@ -174,6 +173,7 @@ public class IntegrationsController(
         }
 
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"Outlook gekoppeld ({email})");
 
         logger.LogInformation("Outlook connected for company {CompanyId} ({Email})", companyId, email);
 
@@ -317,9 +317,41 @@ public class IntegrationsController(
             .FirstOrDefaultAsync();
 
         if (row is null)
-            return Ok(new WhatsAppStatusDto(false, false, null));
+            return Ok(new { connected = false, requested = false, active = false, phoneNumber = (string?)null });
 
-        return Ok(new WhatsAppStatusDto(row.WhatsAppRequested, row.WhatsAppActive, row.WhatsAppPhoneNumber));
+        return Ok(new
+        {
+            connected   = row.WhatsAppActive,
+            requested   = row.WhatsAppRequested,
+            active      = row.WhatsAppActive,
+            phoneNumber = row.WhatsAppPhoneNumber,
+        });
+    }
+
+    [HttpPut("whatsapp/connect")]
+    public async Task<IActionResult> WhatsAppConnect([FromBody] WhatsAppConnectRequest request)
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+            return BadRequest(new { error = "Vul een geldig telefoonnummer in." });
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+        {
+            settings = new Domain.Models.AssistantSettings { CompanyId = companyId };
+            Db.AssistantSettings.Add(settings);
+        }
+
+        settings.WhatsAppPhoneNumber = request.PhoneNumber.Trim();
+        settings.WhatsAppActive      = true;
+        settings.WhatsAppRequested   = true;
+        settings.UpdatedAt           = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"WhatsApp nummer gekoppeld: {settings.WhatsAppPhoneNumber}");
+
+        return Ok(new { connected = true, phoneNumber = settings.WhatsAppPhoneNumber });
     }
 
     [HttpPost("whatsapp/request")]
@@ -350,6 +382,7 @@ public class IntegrationsController(
         settings.WhatsAppRequestedAt = DateTimeOffset.UtcNow;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, "WhatsApp Business aangevraagd");
 
         // Notify admin
         var company = await Db.Companies.FindAsync(companyId);
@@ -360,7 +393,7 @@ public class IntegrationsController(
             {
                 var adminEmail = configuration["AdminEmail"] ?? "quintenwit41@gmail.com";
                 var (subject, html) = emailTemplates.WhatsAppRequestedAdmin(companyName, companyId, aiPhoneNumber);
-                await emailService.SendAsync(adminEmail, "VoxFlow Admin", subject, html);
+                await emailSender.SendNowAsync(null, adminEmail, "VoxFlow Admin", "whatsapp_requested_admin", subject, html);
             }
             catch { }
         });
@@ -384,7 +417,87 @@ public class IntegrationsController(
         settings.WhatsAppRequestedAt = null;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, "WhatsApp ontkoppeld");
+
+        return NoContent();
+    }
+
+    // ── Notify (wachtlijst) ──────────────────────────────────────────────────
+
+    [HttpGet("notify")]
+    public async Task<IActionResult> GetNotifyList()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var keys = await Db.IntegrationNotifyRequests
+            .Where(r => r.CompanyId == companyId && !r.Resolved)
+            .Select(r => r.IntegrationKey)
+            .ToListAsync();
+
+        return Ok(keys);
+    }
+
+    [HttpPost("notify")]
+    public async Task<IActionResult> Subscribe([FromBody] NotifySubscribeRequest body)
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        // Idempotent — skip if already subscribed
+        var exists = await Db.IntegrationNotifyRequests
+            .AnyAsync(r => r.CompanyId == companyId && r.IntegrationKey == body.IntegrationKey && !r.Resolved);
+
+        if (!exists)
+        {
+            Db.IntegrationNotifyRequests.Add(new AiCallAssistent.Domain.Models.IntegrationNotifyRequest
+            {
+                CompanyId       = companyId,
+                IntegrationKey  = body.IntegrationKey,
+                IntegrationName = body.IntegrationName,
+                CreatedAt       = DateTimeOffset.UtcNow,
+            });
+            await Db.SaveChangesAsync();
+        }
+
+        // Send confirmation to company owner + admin notification (fire-and-forget)
+        var owner = await Db.Employees
+            .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null);
+        var company = await Db.Companies.FindAsync(companyId);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (owner?.Email != null)
+                {
+                    var (s, h) = emailTemplates.IntegrationNotifyConfirm(owner.Name, body.IntegrationName);
+                    await emailSender.SendNowAsync(companyId, owner.Email, owner.Name,
+                        "integration_notify_confirm", s, h);
+                }
+                var adminEmail = configuration["AdminEmail"] ?? "quintenwit41@gmail.com";
+                var (as_, ah) = emailTemplates.IntegrationNotifyAdmin(
+                    company?.CompanyName ?? $"Bedrijf {companyId}", companyId, body.IntegrationName);
+                await emailSender.SendNowAsync(null, adminEmail, "VoxFlow Admin", "integration_notify_admin", as_, ah);
+            }
+            catch { }
+        });
+
+        return Ok(new { subscribed = true });
+    }
+
+    [HttpDelete("notify/{key}")]
+    public async Task<IActionResult> Unsubscribe(string key)
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        await Db.IntegrationNotifyRequests
+            .Where(r => r.CompanyId == companyId && r.IntegrationKey == key && !r.Resolved)
+            .ExecuteDeleteAsync();
 
         return NoContent();
     }
 }
+
+public record NotifySubscribeRequest(string IntegrationKey, string IntegrationName);

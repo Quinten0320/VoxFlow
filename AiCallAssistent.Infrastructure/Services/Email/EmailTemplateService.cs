@@ -464,4 +464,75 @@ public class EmailTemplateService
             <p>Registreer dit nummer als WhatsApp-sender in de Meta Business Manager en klik daarna op Activeer in het admin panel.</p>
             {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
             """));
+
+    // ── #58 · Integratie wachtlijst bevestiging (naar klant) ─────────────────
+
+    public (string Subject, string Html) IntegrationNotifyConfirm(string naam, string integratieNaam) =>
+        ($"Je staat op de wachtlijst voor {integratieNaam}", Layout(
+            $"Je hoort het als {integratieNaam} live gaat!",
+            $"""
+            <h2>Je staat op de lijst, {naam}!</h2>
+            <p>We hebben je aanvraag ontvangen. Zodra <strong>{integratieNaam}</strong> beschikbaar is in VoxFlow, sturen we je een bericht.</p>
+            <p>We werken hier actief aan — je bent er vroeg bij.</p>
+            {Cta("Bekijk mijn integraties", DashboardUrl + "/integraties")}
+            """));
+
+    // ── #59 · Integratie is nu live (naar klant) ──────────────────────────────
+
+    public (string Subject, string Html) IntegrationNowLive(string naam, string integratieNaam) =>
+        ($"{integratieNaam} is nu beschikbaar!", Layout(
+            $"Goed nieuws: {integratieNaam} is live.",
+            $"""
+            <h2>Goed nieuws, {naam}!</h2>
+            <p><strong>{integratieNaam}</strong> is nu beschikbaar in VoxFlow. Je kunt het direct activeren via je integratiepagina.</p>
+            {Cta("Integratie activeren", DashboardUrl + "/integraties")}
+            """));
+
+    // ── #60 · Integratie wachtlijst aanvraag (intern naar admin) ─────────────
+
+    public (string Subject, string Html) IntegrationNotifyAdmin(string companyName, short companyId, string integratieNaam) =>
+        ($"Wachtlijst: {integratieNaam} — {companyName}", Layout(
+            $"{companyName} wil {integratieNaam}.",
+            $"""
+            <h2>Nieuwe wachtlijst-aanvraag</h2>
+            <p><strong>Bedrijf:</strong> {companyName} (ID: {companyId})</p>
+            <p><strong>Integratie:</strong> {integratieNaam}</p>
+            <p>Klik op "Live zetten" in het admin panel zodra de integratie beschikbaar is.</p>
+            {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
+            """));
+
+    // ── #61 · Abonnement verlopen — waarschuwing 5 dagen voor verwijdering ──
+
+    public (string Subject, string Html) SubscriptionExpiredWarning(string naam, int daysLeft) =>
+        ("Laatste waarschuwing: uw gegevens worden binnenkort verwijderd", Layout(
+            $"Uw VoxFlow-gegevens worden over {daysLeft} dag{(daysLeft == 1 ? "" : "en")} verwijderd.",
+            $"""
+            <h2>Uw abonnement is verlopen</h2>
+            <p>Beste {naam},</p>
+            <p>Uw VoxFlow-abonnement is verlopen en de assistent is niet meer actief. U heeft nog toegang tot uw dashboard.</p>
+            <p><strong>Over {daysLeft} dag{(daysLeft == 1 ? "" : "en")} worden al uw gegevens definitief verwijderd</strong> in het kader van de AVG-wetgeving. Dit omvat:</p>
+            <ul>
+              <li>Alle gesprekken en belhistorie</li>
+              <li>Afspraken en afspraaktypen</li>
+              <li>Medewerkers en bedrijfsinstellingen</li>
+              <li>Alle overige bedrijfsgegevens</li>
+            </ul>
+            <p>Wilt u uw gegevens behouden? Heractiveer uw abonnement vóór de verwijderdatum.</p>
+            {Cta("Abonnement heractiveren", "https://voxflow.nl/dashboard/instellingen?tab=abo")}
+            <p style="color:#6b7280;font-size:13px;">Heeft u vragen? Neem contact op via info@voxflow.nl.</p>
+            """));
+
+    // ── #62 · Bevestiging gegevensverwijdering (AVG) ─────────────────────────
+
+    public (string Subject, string Html) DataDeleted(string naam) =>
+        ("Uw VoxFlow-gegevens zijn verwijderd", Layout(
+            "Al uw gegevens zijn verwijderd conform de AVG.",
+            $"""
+            <h2>Gegevens verwijderd</h2>
+            <p>Beste {naam},</p>
+            <p>Conform de AVG-wetgeving zijn alle gegevens van uw VoxFlow-account definitief verwijderd.</p>
+            <p>Als u in de toekomst opnieuw gebruik wilt maken van VoxFlow, kunt u een nieuw account aanmaken.</p>
+            {Cta("Nieuw account aanmaken", "https://voxflow.nl/signup")}
+            <p style="color:#6b7280;font-size:13px;">Dit is een automatisch bericht. U hoeft niets te doen.</p>
+            """));
 }

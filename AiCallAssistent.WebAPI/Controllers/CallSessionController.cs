@@ -21,8 +21,6 @@ public class CallSessionController(AppDbContext db) : DashboardControllerBase(db
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
-        var lockout = await RequireActiveSubscriptionAsync(companyId);
-        if (lockout != null) return lockout;
 
         if (page < 1) page = 1;
         if (pageSize < 1) pageSize = 1;

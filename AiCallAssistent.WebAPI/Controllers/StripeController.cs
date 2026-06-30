@@ -134,25 +134,154 @@ public class StripeController(
                             cancelAtPeriodEnd = false });
 
         var cancelAtPeriodEnd = false;
+        string?        pendingPlanName     = null;
+        string?        pendingPlanInterval = null;
+        DateTimeOffset? pendingAt          = null;
+
         if (pkg.StripeSubscriptionId is { Length: > 0 })
         {
             try
             {
-                var sub = await new SubscriptionService().GetAsync(pkg.StripeSubscriptionId);
+                var sub = await new SubscriptionService().GetAsync(
+                    pkg.StripeSubscriptionId,
+                    new SubscriptionGetOptions { Expand = ["schedule"] });
+
                 cancelAtPeriodEnd = sub.CancelAtPeriodEnd;
+
+                // Check for a scheduled plan change (phase 2 of a subscription schedule)
+                if (sub.Schedule is SubscriptionSchedule schedule && schedule.Phases?.Count > 1)
+                {
+                    var nextPhase    = schedule.Phases[1];
+                    var nextPriceId  = nextPhase.Items?.FirstOrDefault()?.Price?.Id;
+                    if (nextPriceId != null)
+                    {
+                        var (resolvedPlan, resolvedInterval) = ResolvePlanFromPriceId(nextPriceId);
+                        if (resolvedPlan != null)
+                        {
+                            pendingPlanName     = resolvedPlan;
+                            pendingPlanInterval = resolvedInterval;
+                            pendingAt           = nextPhase.StartDate != default
+                                ? new DateTimeOffset(nextPhase.StartDate, TimeSpan.Zero)
+                                : null;
+                        }
+                    }
+                }
             }
             catch { /* Stripe unreachable — return what we have in DB */ }
         }
 
         return Ok(new
         {
-            status           = pkg.SubscriptionStatus,
-            planName         = pkg.PlanName,
-            interval         = pkg.BillingInterval,
-            trialEndsAt      = pkg.TrialEndsAt,
-            currentPeriodEnd = pkg.CurrentPeriodEnd,
+            status              = pkg.SubscriptionStatus,
+            planName            = pkg.PlanName,
+            interval            = pkg.BillingInterval,
+            trialEndsAt         = pkg.TrialEndsAt,
+            currentPeriodEnd    = pkg.CurrentPeriodEnd,
             cancelAtPeriodEnd,
+            pendingPlanName,
+            pendingPlanInterval,
+            pendingAt,
         });
+    }
+
+    // ── Change Plan (deferred to next billing date) ───────────────────────────
+
+    [HttpPost("change-plan")]
+    public async Task<IActionResult> ChangePlan([FromBody] ChangePlanRequest request)
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var pkg = await Db.CompanyPackages.FirstOrDefaultAsync(p => p.CompanyId == companyId);
+        if (pkg?.StripeSubscriptionId == null)
+            return BadRequest(new { error = "Geen actief abonnement gevonden." });
+
+        var newPriceId = ResolvePriceId(request.PlanId, request.Interval);
+        if (newPriceId == null)
+            return BadRequest(new { error = "Onbekend pakket of interval." });
+
+        var subService   = new SubscriptionService();
+        var subscription = await subService.GetAsync(pkg.StripeSubscriptionId);
+        var currentItem  = subscription.Items?.Data?.FirstOrDefault();
+        if (currentItem == null)
+            return BadRequest(new { error = "Geen abonnementsitem gevonden." });
+
+        // Same plan + interval → no-op
+        if (currentItem.Price?.Id == newPriceId)
+            return Ok(new { immediate = false, effectiveDate = (DateTimeOffset?)null, unchanged = true });
+
+        // During trial: change immediately (no money involved yet)
+        if (pkg.SubscriptionStatus == "trialing")
+        {
+            await subService.UpdateAsync(pkg.StripeSubscriptionId, new SubscriptionUpdateOptions
+            {
+                Items = [new SubscriptionItemOptions { Id = currentItem.Id, Price = newPriceId }],
+                ProrationBehavior = "none",
+            });
+            return Ok(new { immediate = true, effectiveDate = (DateTimeOffset?)null });
+        }
+
+        // Active: cancel any existing schedule first to avoid conflicts
+        if (subscription.ScheduleId != null)
+        {
+            try
+            {
+                await new SubscriptionScheduleService().CancelAsync(
+                    subscription.ScheduleId,
+                    new SubscriptionScheduleCancelOptions { InvoiceNow = false, Prorate = false });
+                // Re-fetch so ScheduleId is cleared
+                subscription = await subService.GetAsync(pkg.StripeSubscriptionId);
+                currentItem  = subscription.Items?.Data?.FirstOrDefault()!;
+            }
+            catch { /* ignore if schedule already released */ }
+        }
+
+        // Create schedule from current subscription state
+        var scheduleService = new SubscriptionScheduleService();
+        var schedule = await scheduleService.CreateAsync(new SubscriptionScheduleCreateOptions
+        {
+            FromSubscription = pkg.StripeSubscriptionId,
+        });
+
+        var periodEnd = currentItem.CurrentPeriodEnd;
+
+        // Phase 1: keep current plan until end of billing period (no proration)
+        // Phase 2: switch to new plan — Stripe starts this when phase 1 ends
+        await scheduleService.UpdateAsync(schedule.Id, new SubscriptionScheduleUpdateOptions
+        {
+            EndBehavior = "release",
+            Phases =
+            [
+                new SubscriptionSchedulePhaseOptions
+                {
+                    StartDate = new AnyOf<DateTime?, SubscriptionSchedulePhaseStartDate>(SubscriptionSchedulePhaseStartDate.Now),
+                    EndDate   = new AnyOf<DateTime?, SubscriptionSchedulePhaseEndDate>(periodEnd),
+                    Items     =
+                    [
+                        new SubscriptionSchedulePhaseItemOptions
+                        {
+                            Price    = currentItem.Price!.Id,
+                            Quantity = 1,
+                        }
+                    ],
+                    ProrationBehavior = "none",
+                },
+                new SubscriptionSchedulePhaseOptions
+                {
+                    Items =
+                    [
+                        new SubscriptionSchedulePhaseItemOptions
+                        {
+                            Price    = newPriceId,
+                            Quantity = 1,
+                        }
+                    ],
+                },
+            ],
+        });
+
+        var effectiveDate = new DateTimeOffset(periodEnd, TimeSpan.Zero);
+        return Ok(new { immediate = false, effectiveDate });
     }
 
     // ── Customer Portal ───────────────────────────────────────────────────────
@@ -270,15 +399,26 @@ public class StripeController(
             .FirstOrDefaultAsync(p => p.StripeSubscriptionId == subscription.Id);
         if (pkg == null) return;
 
+        var prevStatus    = pkg.SubscriptionStatus;
+        var oldPeriodEnd  = pkg.CurrentPeriodEnd;
+
         pkg.SubscriptionStatus = subscription.Status;
         pkg.TrialEndsAt        = subscription.TrialEnd.HasValue
             ? new DateTimeOffset(subscription.TrialEnd.Value, TimeSpan.Zero)
             : null;
         var item = subscription.Items?.Data?.FirstOrDefault();
-        pkg.CurrentPeriodEnd = item != null
+        var newPeriodEnd = item != null
             ? new DateTimeOffset(item.CurrentPeriodEnd, TimeSpan.Zero)
-            : null;
+            : (DateTimeOffset?)null;
+        pkg.CurrentPeriodEnd = newPeriodEnd;
         pkg.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Track when a subscription first enters a non-paying state (for 30-day AVG deletion)
+        var isExpiredStatus = subscription.Status is "past_due" or "unpaid" or "canceled";
+        if (isExpiredStatus && pkg.SubscriptionExpiredAt == null)
+            pkg.SubscriptionExpiredAt = DateTimeOffset.UtcNow;
+        else if (!isExpiredStatus)
+            pkg.SubscriptionExpiredAt = null;
 
         // Update plan name / interval when the customer upgrades or downgrades
         if (item?.Price?.Id is { Length: > 0 } priceId)
@@ -293,7 +433,84 @@ public class StripeController(
         }
 
         await Db.SaveChangesAsync();
+
+        // Overage billing: when period rolls over, bill extra minutes from the completed period.
+        // Only runs when AllowOverage=true, a minute limit is set, and the subscription is active.
+        var periodRolledOver = oldPeriodEnd.HasValue && newPeriodEnd.HasValue
+                            && newPeriodEnd.Value > oldPeriodEnd.Value;
+
+        if (periodRolledOver
+            && pkg.AllowOverage
+            && pkg.MaxCallMinutes.HasValue
+            && pkg.StripeCustomerId is { Length: > 0 }
+            && subscription.Status is "active" or "trialing")
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await BillOverageAsync(pkg.CompanyId, pkg.StripeCustomerId!,
+                        pkg.MaxCallMinutes!.Value, pkg.BillingInterval, pkg.PlanName, oldPeriodEnd!.Value);
+                }
+                catch { }
+            });
+        }
     }
+
+    private async Task BillOverageAsync(
+        short companyId, string stripeCustomerId,
+        int maxCallMinutes, string? billingInterval, string? planName, DateTimeOffset oldPeriodEnd)
+    {
+        var ratePerMinuteCents = OverageRateForPlan(planName);
+        if (ratePerMinuteCents <= 0) return;
+
+        // Determine start of the completed billing period.
+        var periodStart = billingInterval == "yearly"
+            ? oldPeriodEnd.AddYears(-1)
+            : oldPeriodEnd.AddMonths(-1);
+
+        // Effective limit in seconds (yearly plan = 12× monthly limit).
+        var periodLimitSeconds = (long)(billingInterval == "yearly"
+            ? maxCallMinutes * 12
+            : maxCallMinutes) * 60;
+
+        var usedSeconds = await Db.CallSessions
+            .Where(s => s.CompanyId == companyId
+                     && s.StartedAt >= periodStart
+                     && s.StartedAt < oldPeriodEnd
+                     && s.DurationSeconds != null)
+            .SumAsync(s => (long?)s.DurationSeconds ?? 0);
+
+        var overageSeconds = usedSeconds - periodLimitSeconds;
+        if (overageSeconds <= 0) return;
+
+        // Bill per second, rounded up to nearest cent.
+        var amountCents = (long)Math.Ceiling(overageSeconds * ratePerMinuteCents / 60.0);
+        if (amountCents <= 0) return;
+
+        var overageMin = overageSeconds / 60;
+        var overageSec = overageSeconds % 60;
+        var timeStr    = overageSec > 0 ? $"{overageMin} min {overageSec} sec" : $"{overageMin} min";
+        var rateStr    = $"€{ratePerMinuteCents / 100m:0.00}";
+        var description = $"Buitenbundel: {timeStr} × {rateStr}/min (per sec. afgerekend)";
+
+        await new InvoiceItemService().CreateAsync(new InvoiceItemCreateOptions
+        {
+            Customer    = stripeCustomerId,
+            Amount      = amountCents,
+            Currency    = "eur",
+            Description = description,
+        });
+    }
+
+    // Overage rate in euro-cents per minute, matching website pricing.
+    private static int OverageRateForPlan(string? planName) => planName switch
+    {
+        "Start" => 23,  // €0,23/min
+        "Basis" => 20,  // €0,20/min
+        "Groei" => 18,  // €0,18/min
+        _       => 0,   // unknown plan → don't bill
+    };
 
     private async Task HandleSubscriptionDeleted(Event stripeEvent)
     {
@@ -304,8 +521,9 @@ public class StripeController(
             .FirstOrDefaultAsync(p => p.StripeSubscriptionId == subscription.Id);
         if (pkg == null) return;
 
-        pkg.SubscriptionStatus = "canceled";
-        pkg.UpdatedAt          = DateTimeOffset.UtcNow;
+        pkg.SubscriptionStatus    = "canceled";
+        pkg.SubscriptionExpiredAt ??= DateTimeOffset.UtcNow;
+        pkg.UpdatedAt             = DateTimeOffset.UtcNow;
         await Db.SaveChangesAsync();
 
         var owner = await Db.Employees
@@ -387,23 +605,27 @@ public class StripeController(
                                    && p.StripeCustomerId != null);
         if (referrer?.StripeCustomerId == null) return;
 
-        // Fetch the referrer's actual subscription to credit exactly 1 month's price
-        long creditCents;
+        // Determine referrer's monthly price
+        long referrerMonthlyCents = 0;
         if (referrer.StripeSubscriptionId != null)
         {
             var subService = new SubscriptionService();
             var refSub     = await subService.GetAsync(referrer.StripeSubscriptionId);
             var item       = refSub?.Items?.Data?.FirstOrDefault();
             var unitAmount = item?.Price?.UnitAmount ?? 0;
-            // For yearly plans credit 1/12th; for monthly plans credit the full amount
-            creditCents = item?.Price?.Recurring?.Interval == "year"
-                ? -(unitAmount / 12)
-                : -unitAmount;
+            referrerMonthlyCents = item?.Price?.Recurring?.Interval == "year"
+                ? unitAmount / 12
+                : unitAmount;
         }
-        else
-        {
-            creditCents = -invoice.AmountPaid; // fallback: credit what the referred person paid
-        }
+
+        // Referred's monthly price = what they paid on this invoice (already monthly for subscription_cycle)
+        var referredMonthlyCents = invoice.AmountPaid;
+
+        // Credit = min(referred price, referrer price) — capped at referrer's own monthly amount
+        // so a lower-tier referrer never gets more than 1 full month of their own plan
+        var creditCents = referrerMonthlyCents > 0
+            ? -Math.Min(referredMonthlyCents, referrerMonthlyCents)
+            : -referredMonthlyCents;
 
         if (creditCents == 0) return;
 
@@ -475,3 +697,4 @@ public class StripeController(
 }
 
 public record CreateCheckoutSessionRequest(string PlanId, string Interval, string? ReferralCode, string? FrontendOrigin);
+public record ChangePlanRequest(string PlanId, string Interval);

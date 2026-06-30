@@ -28,12 +28,19 @@ public class AppointmentType
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
 
-    [Column("auto_transfer_enabled")]
-    public bool AutoTransferEnabled { get; set; } = false;
+    [Column("location")]
+    public string? Location { get; set; }
 
-    [Column("auto_transfer_department_id")]
-    public long? AutoTransferDepartmentId { get; set; }
+    /// <summary>When true the bot offers to transfer the caller to a human when the customer requests it.</summary>
+    [Column("transfer_on_request")]
+    public bool TransferOnRequest { get; set; } = false;
+
+    /// <summary>When true the bot offers to schedule a callback when the customer requests it.</summary>
+    [Column("callback_on_request")]
+    public bool CallbackOnRequest { get; set; } = false;
 
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
+
+    public ICollection<AppointmentTypeEmployee> AppointmentTypeEmployees { get; set; } = [];
 }

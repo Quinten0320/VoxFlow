@@ -3,6 +3,7 @@ using AiCallAssistent.Application.Helpers;
 using AiCallAssistent.Application.Services;
 using AiCallAssistent.Domain.Models;
 using AiCallAssistent.Infrastructure.Data;
+using AssistantSettings = AiCallAssistent.Domain.Models.AssistantSettings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -41,7 +42,9 @@ public class AppointmentService : IAppointmentService
                 Name = t.Name,
                 DisplayName = t.DisplayName,
                 DurationMinutes = t.DurationMinutes,
-                WaitTime = t.WaitTime
+                WaitTime = t.WaitTime,
+                TransferOnRequest = t.TransferOnRequest,
+                CallbackOnRequest = t.CallbackOnRequest,
             })
             .ToListAsync();
     }
@@ -79,9 +82,35 @@ public class AppointmentService : IAppointmentService
         var startUtc = request.StartTime.ToUniversalTime();
         var endUtc = endTime.ToUniversalTime();
 
+        // Max-per-day check (0 or null = unlimited)
+        var maxPerDay = await _db.Set<AssistantSettings>()
+            .Where(s => s.CompanyId == request.CompanyId)
+            .Select(s => (int?)s.MaxAppointmentsPerDay)
+            .FirstOrDefaultAsync();
+
+        if (maxPerDay is > 0)
+        {
+            var dayStart = NlTimeZone.ToDateTimeOffset(dateNl, TimeOnly.MinValue).ToUniversalTime();
+            var dayEnd   = dayStart.AddDays(1);
+            var countToday = await _db.Appointments
+                .CountAsync(a => a.CompanyId == request.CompanyId
+                              && a.StartTime >= dayStart
+                              && a.StartTime < dayEnd);
+
+            if (countToday >= maxPerDay.Value)
+                throw new InvalidOperationException(
+                    $"Er kunnen maximaal {maxPerDay.Value} afspraken per dag worden ingepland. Op {dateNl:dddd d MMMM} zijn alle plekken al vergeven. Probeer een andere datum.");
+        }
+
+        // Resolve which employees are eligible for this appointment type (empty = all active).
+        var eligibleEmployeeIds = await _db.AppointmentTypeEmployees
+            .Where(x => x.AppointmentTypeId == typeConfig.AppointmentTypeId)
+            .Select(x => x.EmployeeId)
+            .ToListAsync();
+
         var employeeId = request.EmployeeId.HasValue
-            ? await ValidateEmployeeAsync(request.EmployeeId.Value, request.CompanyId, startUtc, endUtc)
-            : await FindAvailableEmployeeIdAsync(request.CompanyId, startUtc, endUtc);
+            ? await ValidateEmployeeAsync(request.EmployeeId.Value, request.CompanyId, startUtc, endUtc, eligibleEmployeeIds)
+            : await FindAvailableEmployeeIdAsync(request.CompanyId, startUtc, endUtc, eligibleEmployeeIds);
 
         var appointment = new Appointment
         {
@@ -133,17 +162,6 @@ public class AppointmentService : IAppointmentService
             }
         }
 
-        // Resolve auto-transfer department phone if configured for this appointment type.
-        string? autoTransferNumber = null;
-        if (typeConfig.AutoTransferEnabled && typeConfig.AutoTransferDepartmentId.HasValue)
-        {
-            autoTransferNumber = await _db.CompanyDepartments
-                .Where(d => d.DepartmentId == typeConfig.AutoTransferDepartmentId.Value
-                         && d.CompanyId == request.CompanyId && d.IsActive)
-                .Select(d => (string?)d.PhoneNumber)
-                .FirstOrDefaultAsync();
-        }
-
         return new AppointmentResponse
         {
             AppointmentId = appointment.AppointmentId,
@@ -154,7 +172,6 @@ public class AppointmentService : IAppointmentService
             Description = appointment.Description,
             StartTime = NlTimeZone.ConvertFromUtc(appointment.StartTime),
             EndTime = NlTimeZone.ConvertFromUtc(appointment.EndTime),
-            AutoTransferNumber = autoTransferNumber
         };
     }
 
@@ -181,7 +198,7 @@ public class AppointmentService : IAppointmentService
             };
         }
 
-        var employees = await GetActiveEmployeesAsync(companyId);
+        var employees = await GetActiveEmployeesAsync(companyId, typeConfig.AppointmentTypeId);
         _logger.LogInformation("GetAvailability: {EmployeeCount} employee(s), {RangeCount} opening range(s) for {Date}",
             employees.Count, ranges.Count, date);
 
@@ -236,7 +253,7 @@ public class AppointmentService : IAppointmentService
             .FirstOrDefaultAsync(t => t.CompanyId == companyId && t.Name == type && t.IsActive)
             ?? throw new ArgumentException($"Afspraaktype '{type}' is niet beschikbaar. Roep get_appointment_types aan voor de juiste naam.");
 
-        var employees = await GetActiveEmployeesAsync(companyId);
+        var employees = await GetActiveEmployeesAsync(companyId, typeConfig.AppointmentTypeId);
         if (employees.Count == 0)
             return new SoonestAvailableResponse { CompanyId = companyId, Type = type, DurationMinutes = typeConfig.DurationMinutes };
 
@@ -405,10 +422,19 @@ public class AppointmentService : IAppointmentService
         return slots.OrderBy(s => s.Start).ToList();
     }
 
-    private async Task<List<EmployeeInfo>> GetActiveEmployeesAsync(short companyId)
+    private async Task<List<EmployeeInfo>> GetActiveEmployeesAsync(short companyId, long appointmentTypeId)
     {
-        var rows = await _db.Employees
-            .Where(e => e.CompanyId == companyId && e.IsActive)
+        // Load employees assigned to this appointment type (empty = all active employees).
+        var assignedIds = await _db.AppointmentTypeEmployees
+            .Where(x => x.AppointmentTypeId == appointmentTypeId)
+            .Select(x => x.EmployeeId)
+            .ToListAsync();
+
+        var query = _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive);
+        if (assignedIds.Count > 0)
+            query = query.Where(e => assignedIds.Contains(e.EmployeeId));
+
+        var rows = await query
             .Select(e => new { e.EmployeeId, e.Name })
             .ToListAsync();
 
@@ -429,13 +455,15 @@ public class AppointmentService : IAppointmentService
         return rows.ConvertAll(r => new BookedSlot(r.EmployeeId, r.StartTime, r.EndTime));
     }
 
-    private async Task<long> ValidateEmployeeAsync(long employeeId, short companyId, DateTimeOffset startUtc, DateTimeOffset endUtc)
+    private async Task<long> ValidateEmployeeAsync(long employeeId, short companyId, DateTimeOffset startUtc, DateTimeOffset endUtc, List<long> eligibleIds)
     {
-        var exists = await _db.Employees
-            .AnyAsync(e => e.EmployeeId == employeeId && e.CompanyId == companyId && e.IsActive);
+        var query = _db.Employees.Where(e => e.EmployeeId == employeeId && e.CompanyId == companyId && e.IsActive);
+        if (eligibleIds.Count > 0)
+            query = query.Where(e => eligibleIds.Contains(e.EmployeeId));
 
+        var exists = await query.AnyAsync();
         if (!exists)
-            throw new ArgumentException("Employee not found or not active.");
+            throw new ArgumentException("Medewerker niet gevonden, niet actief, of niet bevoegd voor dit afspraaktype.");
 
         var hasConflict = await _db.Appointments
             .AnyAsync(a => a.EmployeeId == employeeId && a.StartTime < endUtc && a.EndTime > startUtc);
@@ -450,18 +478,21 @@ public class AppointmentService : IAppointmentService
         return employeeId;
     }
 
-    private async Task<long> FindAvailableEmployeeIdAsync(short companyId, DateTimeOffset startUtc, DateTimeOffset endUtc)
+    private async Task<long> FindAvailableEmployeeIdAsync(short companyId, DateTimeOffset startUtc, DateTimeOffset endUtc, List<long> eligibleIds)
     {
-        var employeeId = await _db.Employees
-            .Where(e => e.CompanyId == companyId && e.IsActive &&
-                !_db.Appointments.Any(a =>
+        var query = _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive);
+        if (eligibleIds.Count > 0)
+            query = query.Where(e => eligibleIds.Contains(e.EmployeeId));
+
+        var employeeId = await query
+            .Where(e => !_db.Appointments.Any(a =>
                     a.EmployeeId == e.EmployeeId &&
                     a.StartTime < endUtc &&
                     a.EndTime > startUtc))
             .Select(e => (long?)e.EmployeeId)
             .FirstOrDefaultAsync();
 
-        return employeeId ?? throw new InvalidOperationException("Er is geen medewerker beschikbaar op dit tijdstip. Roep check_availability aan om beschikbare tijdsloten te vinden.");
+        return employeeId ?? throw new InvalidOperationException("Er is geen bevoegde medewerker beschikbaar op dit tijdstip. Roep check_availability aan om beschikbare tijdsloten te vinden.");
     }
 
     /// <summary>

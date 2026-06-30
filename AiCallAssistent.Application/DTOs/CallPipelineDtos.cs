@@ -7,6 +7,7 @@ namespace AiCallAssistent.Application.DTOs;
 public record CompanyFeatures(
     int? MaxCallMinutes,
     int? MaxWhatsAppPerMonth,
+    bool AllowOverage,
     bool Blacklist,
     bool CallbackRequests,
     bool WhatsAppConfirmation,
@@ -20,6 +21,7 @@ public record CompanyFeatures(
     public static CompanyFeatures Default { get; } = new(
         MaxCallMinutes: null,
         MaxWhatsAppPerMonth: null,
+        AllowOverage: true,
         Blacklist: true,
         CallbackRequests: true,
         WhatsAppConfirmation: true,

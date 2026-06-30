@@ -18,8 +18,6 @@ public class DashboardStatsController(AppDbContext db) : DashboardControllerBase
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
-        var lockout = await RequireActiveSubscriptionAsync(companyId);
-        if (lockout != null) return lockout;
 
         var nowUtc = DateTimeOffset.UtcNow;
         var nowNl = NlTimeZone.Now;

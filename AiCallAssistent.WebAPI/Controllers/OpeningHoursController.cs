@@ -97,6 +97,10 @@ public class OpeningHoursController(AppDbContext db) : DashboardControllerBase(d
         Db.CompanyOpeningTimeRanges.AddRange(ranges);
         await Db.SaveChangesAsync();
 
+        var dagNamen = new[] { "", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag" };
+        var status   = request.IsActive ? "bijgewerkt" : "uitgeschakeld";
+        await LogAuditAsync(companyId, $"Openingstijden {dagNamen[dayOfWeek]} {status}");
+
         return NoContent();
     }
 }

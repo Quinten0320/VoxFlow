@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<AppointmentType> AppointmentTypes => Set<AppointmentType>();
+    public DbSet<AppointmentTypeEmployee> AppointmentTypeEmployees => Set<AppointmentTypeEmployee>();
     public DbSet<CompanyOpeningHour> CompanyOpeningHours => Set<CompanyOpeningHour>();
     public DbSet<CompanyOpeningTimeRange> CompanyOpeningTimeRanges => Set<CompanyOpeningTimeRange>();
     public DbSet<CompanyOpeningException> CompanyOpeningExceptions => Set<CompanyOpeningException>();
@@ -29,6 +30,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
     public DbSet<EmailJob> EmailJobs => Set<EmailJob>();
     public DbSet<WhatsAppMessageLog> WhatsAppMessageLogs => Set<WhatsAppMessageLog>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<IntegrationNotifyRequest> IntegrationNotifyRequests => Set<IntegrationNotifyRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,6 +82,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<BotActiveHour>(entity =>
         {
             entity.HasIndex(h => new { h.CompanyId, h.DayOfWeek });
+        });
+
+        modelBuilder.Entity<AppointmentTypeEmployee>(entity =>
+        {
+            entity.HasKey(x => new { x.AppointmentTypeId, x.EmployeeId });
         });
     }
 }

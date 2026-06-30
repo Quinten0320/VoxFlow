@@ -14,6 +14,13 @@ public class CompanyPackage
     [Column("max_call_minutes")]
     public int? MaxCallMinutes { get; set; }
 
+    /// <summary>
+    /// When false: assistant stops answering calls once MaxCallMinutes is reached this billing period.
+    /// When true (default): calls continue and overage is billed separately.
+    /// </summary>
+    [Column("allow_overage")]
+    public bool AllowOverage { get; set; } = true;
+
     [Column("max_whatsapp_per_month")]
     public int? MaxWhatsAppPerMonth { get; set; }
 
@@ -74,6 +81,14 @@ public class CompanyPackage
 
     [Column("referral_rewarded_at")]
     public DateTimeOffset? ReferralRewardedAt { get; set; }
+
+    /// <summary>
+    /// Set when status transitions to past_due / unpaid / canceled.
+    /// Cleared when the subscription becomes active again.
+    /// DataRetentionService deletes all company data 30 days after this timestamp.
+    /// </summary>
+    [Column("subscription_expired_at")]
+    public DateTimeOffset? SubscriptionExpiredAt { get; set; }
 
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }

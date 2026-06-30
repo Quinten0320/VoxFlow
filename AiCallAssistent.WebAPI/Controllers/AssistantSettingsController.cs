@@ -15,8 +15,6 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
-        var lockout = await RequireActiveSubscriptionAsync(companyId);
-        if (lockout != null) return lockout;
 
         var settings = await Db.AssistantSettings
             .Where(s => s.CompanyId == companyId)
@@ -86,7 +84,45 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, "Assistent instellingen bijgewerkt");
 
         return NoContent();
     }
+
+    [HttpGet("appointment-limits")]
+    public async Task<IActionResult> GetAppointmentLimits()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var maxPerDay = await Db.AssistantSettings
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => (int?)s.MaxAppointmentsPerDay)
+            .FirstOrDefaultAsync();
+
+        return Ok(new { maxPerDay });
+    }
+
+    [HttpPut("appointment-limits")]
+    public async Task<IActionResult> UpdateAppointmentLimits([FromBody] UpdateAppointmentLimitsRequest request)
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null)
+        {
+            settings = new DomainAssistantSettings { CompanyId = companyId };
+            Db.AssistantSettings.Add(settings);
+        }
+
+        // 0 treated as unlimited (same as null)
+        settings.MaxAppointmentsPerDay = request.MaxPerDay is null or 0 ? null : request.MaxPerDay;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await Db.SaveChangesAsync();
+        return NoContent();
+    }
 }
+
+public record UpdateAppointmentLimitsRequest(int? MaxPerDay);

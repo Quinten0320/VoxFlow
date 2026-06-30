@@ -15,16 +15,11 @@ public class WhatsAppService(
     ILogger<WhatsAppService> logger,
     AppDbContext db) : IWhatsAppService
 {
-    private async Task SendAsync(string toNumber, string message, string? fromNumber = null)
+    // ── Low-level send (Twilio API) ──────────────────────────────────────────
+
+    private async Task SendRawAsync(string toNumber, string message, string fromNumber)
     {
         var settings = twilioSettings.Value;
-        var sender = fromNumber ?? settings.WhatsAppFrom;
-
-        if (string.IsNullOrWhiteSpace(sender))
-        {
-            logger.LogDebug("WhatsApp skipped — no sender number configured");
-            return;
-        }
 
         try
         {
@@ -34,7 +29,7 @@ public class WhatsAppService(
             var response = await client.PostAsync(url, new FormUrlEncodedContent(
                 new Dictionary<string, string>
                 {
-                    ["From"] = $"whatsapp:{sender}",
+                    ["From"] = $"whatsapp:{fromNumber}",
                     ["To"]   = $"whatsapp:{toNumber}",
                     ["Body"] = message
                 }));
@@ -52,63 +47,7 @@ public class WhatsAppService(
         }
     }
 
-    private async Task SendAppointmentConfirmationAsync(
-        string toNumber, string displayName, DateTimeOffset startTime, string employeeName,
-        string? fromNumber = null)
-    {
-        var nl = NlTimeZone.ConvertFromUtc(startTime);
-        var msg =
-            $"✅ Uw afspraak is bevestigd!\n\n" +
-            $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
-            $"💇 {displayName}\n" +
-            $"👤 {employeeName}\n\n" +
-            $"Wilt u de afspraak wijzigen? Bel ons dan.";
-
-        await SendAsync(toNumber, msg, fromNumber);
-    }
-
-    private async Task SendAppointmentReminderAsync(
-        string toNumber, string displayName, DateTimeOffset startTime,
-        string employeeName, string companyName, string? fromNumber = null)
-    {
-        var nl = NlTimeZone.ConvertFromUtc(startTime);
-        var msg =
-            $"⏰ Herinnering: morgen heeft u een afspraak bij {companyName}!\n\n" +
-            $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
-            $"💇 {displayName}\n" +
-            $"👤 {employeeName}";
-
-        await SendAsync(toNumber, msg, fromNumber);
-    }
-
-    private async Task SendCallbackConfirmationAsync(
-        string toNumber, string callerName, DateTimeOffset scheduledFrom, DateTimeOffset scheduledUntil,
-        string? fromNumber = null)
-    {
-        var fromNl = NlTimeZone.ConvertFromUtc(scheduledFrom);
-        var untilNl = NlTimeZone.ConvertFromUtc(scheduledUntil);
-        var msg =
-            $"📞 Terugbelverzoek ontvangen, {callerName}!\n\n" +
-            $"Wij bellen u terug op {fromNl:dddd d MMMM} tussen {fromNl:HH:mm} en {untilNl:HH:mm}.\n\n" +
-            $"Staat u ergens anders voor open? Bel ons dan even.";
-
-        await SendAsync(toNumber, msg, fromNumber);
-    }
-
-    private Task SendAppointmentDayReminderAsync(
-        string toNumber, string displayName, DateTimeOffset startTime,
-        string employeeName, string companyName, string? fromNumber = null)
-        => SendAppointmentReminderAsync(toNumber, displayName, startTime, employeeName, companyName, fromNumber);
-
-    private async Task SendAppointmentFollowupAsync(
-        string toNumber, string displayName, string companyName, string? fromNumber = null)
-    {
-        var msg =
-            $"😊 Bedankt voor uw bezoek bij {companyName}!\n\n" +
-            $"We hopen dat uw {displayName} naar wens was. Tot de volgende keer!";
-
-        await SendAsync(toNumber, msg, fromNumber);
-    }
+    // ── Company-aware send (quota + active check + logging) ──────────────────
 
     public async Task SendForCompanyAsync(short companyId, string toNumber, string message, string messageType)
     {
@@ -119,6 +58,12 @@ public class WhatsAppService(
         if (settings is null || !settings.WhatsAppActive)
         {
             logger.LogDebug("WhatsApp skipped for company {CompanyId} — not active", companyId);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.WhatsAppPhoneNumber))
+        {
+            logger.LogDebug("WhatsApp skipped for company {CompanyId} — no sender number", companyId);
             return;
         }
 
@@ -140,7 +85,7 @@ public class WhatsAppService(
             }
         }
 
-        await SendAsync(toNumber, message, settings.WhatsAppPhoneNumber);
+        await SendRawAsync(toNumber, message, settings.WhatsAppPhoneNumber);
 
         db.WhatsAppMessageLogs.Add(new WhatsAppMessageLog
         {
@@ -150,5 +95,67 @@ public class WhatsAppService(
             SentAt      = DateTimeOffset.UtcNow,
         });
         await db.SaveChangesAsync();
+    }
+
+    // ── Typed message senders — single place for all message content ──────────
+
+    public Task SendAppointmentConfirmationAsync(short companyId, string toNumber,
+        DateTimeOffset startTime, string serviceType, string employeeName)
+    {
+        var nl = NlTimeZone.ConvertFromUtc(startTime);
+        var msg =
+            $"✅ Uw afspraak is bevestigd!\n\n" +
+            $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+            $"💇 {serviceType}\n" +
+            $"👤 {employeeName}\n\n" +
+            $"Tot dan!";
+        return SendForCompanyAsync(companyId, toNumber, msg, "confirmation");
+    }
+
+    public Task SendAppointmentReminderAsync(short companyId, string toNumber,
+        string companyName, DateTimeOffset startTime, string serviceType, string employeeName)
+    {
+        var nl = NlTimeZone.ConvertFromUtc(startTime);
+        var msg =
+            $"⏰ Herinnering: morgen heeft u een afspraak bij {companyName}!\n\n" +
+            $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+            $"💇 {serviceType}\n" +
+            $"👤 {employeeName}\n\n" +
+            $"Tot dan!";
+        return SendForCompanyAsync(companyId, toNumber, msg, "reminder");
+    }
+
+    public Task SendAppointmentDayReminderAsync(short companyId, string toNumber,
+        string companyName, DateTimeOffset startTime, string serviceType, string employeeName)
+    {
+        var nl = NlTimeZone.ConvertFromUtc(startTime);
+        var msg =
+            $"⏰ Herinnering: vandaag heeft u een afspraak bij {companyName}!\n\n" +
+            $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
+            $"💇 {serviceType}\n" +
+            $"👤 {employeeName}\n\n" +
+            $"Tot straks!";
+        return SendForCompanyAsync(companyId, toNumber, msg, "day_reminder");
+    }
+
+    public Task SendCallbackConfirmationAsync(short companyId, string toNumber,
+        string callerName, DateTimeOffset scheduledFrom, DateTimeOffset scheduledUntil)
+    {
+        var fromNl  = NlTimeZone.ConvertFromUtc(scheduledFrom);
+        var untilNl = NlTimeZone.ConvertFromUtc(scheduledUntil);
+        var msg =
+            $"📞 Terugbelverzoek ontvangen, {callerName}!\n\n" +
+            $"Wij bellen u terug op {fromNl:dddd d MMMM} tussen {fromNl:HH:mm} en {untilNl:HH:mm}.\n\n" +
+            $"Tot dan!";
+        return SendForCompanyAsync(companyId, toNumber, msg, "callback");
+    }
+
+    public Task SendAppointmentFollowupAsync(short companyId, string toNumber,
+        string companyName, string serviceType)
+    {
+        var msg =
+            $"Bedankt voor uw bezoek bij {companyName}!\n\n" +
+            $"We hopen dat uw {serviceType} naar wens was. Tot de volgende keer!";
+        return SendForCompanyAsync(companyId, toNumber, msg, "followup");
     }
 }

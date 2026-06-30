@@ -55,7 +55,7 @@ public class CallSetupService(
             var pkg = await db.CompanyPackages
                 .AsNoTracking()
                 .Where(p => p.CompanyId == companyId)
-                .Select(p => new { p.SubscriptionStatus, p.CurrentPeriodEnd })
+                .Select(p => new { p.SubscriptionStatus, p.CurrentPeriodEnd, p.AllowOverage })
                 .FirstOrDefaultAsync();
 
             if (pkg != null)
@@ -66,6 +66,30 @@ public class CallSetupService(
                     "canceled" => pkg.CurrentPeriodEnd == null || pkg.CurrentPeriodEnd < DateTimeOffset.UtcNow,
                     _ => false,
                 };
+
+                // Minute-limit check: only blocks when AllowOverage = false and a limit is set.
+                if (!isSubscriptionLocked && !pkg.AllowOverage && features.MaxCallMinutes.HasValue)
+                {
+                    // Count minutes used since the start of the current billing period.
+                    var periodStart = pkg.CurrentPeriodEnd.HasValue
+                        ? pkg.CurrentPeriodEnd.Value.AddMonths(-1)
+                        : new DateTimeOffset(DateTimeOffset.UtcNow.Year, DateTimeOffset.UtcNow.Month, 1, 0, 0, 0, TimeSpan.Zero);
+
+                    var usedSeconds = await db.CallSessions
+                        .Where(s => s.CompanyId == companyId
+                                 && s.StartedAt >= periodStart
+                                 && s.DurationSeconds != null)
+                        .SumAsync(s => (long?)s.DurationSeconds ?? 0);
+
+                    var usedMinutes = (int)(usedSeconds / 60);
+                    if (usedMinutes >= features.MaxCallMinutes.Value)
+                    {
+                        logger.LogInformation(
+                            "Call minute limit reached for company {CompanyId}: {Used}/{Limit} min — blocking call",
+                            companyId, usedMinutes, features.MaxCallMinutes.Value);
+                        isSubscriptionLocked = true;
+                    }
+                }
             }
         }
         catch (Exception ex)

@@ -81,14 +81,9 @@ public class AppointmentNotificationService(
                 var features = await packageService.GetFeaturesAsync(item.CompanyId);
                 if (!features.WhatsAppReminders) continue;
 
-                var nl = NlTimeZone.ConvertFromUtc(item.StartTime);
-                var msg =
-                    $"⏰ Herinnering: morgen heeft u een afspraak bij {item.CompanyName}!\n\n" +
-                    $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
-                    $"💇 {item.DisplayName}\n" +
-                    $"👤 {item.EmployeeName}";
-
-                await whatsApp.SendForCompanyAsync(item.CompanyId, item.CallerPhoneNumber, msg, "reminder");
+                await whatsApp.SendAppointmentReminderAsync(
+                    item.CompanyId, item.CallerPhoneNumber,
+                    item.CompanyName, item.StartTime, item.DisplayName, item.EmployeeName);
 
                 await db.Appointments
                     .Where(a => a.AppointmentId == item.AppointmentId)
@@ -138,11 +133,9 @@ public class AppointmentNotificationService(
                 var features = await packageService.GetFeaturesAsync(item.CompanyId);
                 if (!features.WhatsAppReminders) continue;
 
-                var msg =
-                    $"😊 Bedankt voor uw bezoek bij {item.CompanyName}!\n\n" +
-                    $"We hopen dat uw {item.DisplayName} naar wens was. Tot de volgende keer!";
-
-                await whatsApp.SendForCompanyAsync(item.CompanyId, item.CallerPhoneNumber, msg, "followup");
+                await whatsApp.SendAppointmentFollowupAsync(
+                    item.CompanyId, item.CallerPhoneNumber,
+                    item.CompanyName, item.DisplayName);
 
                 await db.Appointments
                     .Where(a => a.AppointmentId == item.AppointmentId)

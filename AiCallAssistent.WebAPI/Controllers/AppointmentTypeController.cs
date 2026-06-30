@@ -9,7 +9,6 @@ namespace AiCallAssistent.WebAPI.Controllers;
 [Route("api/appointment-types")]
 public class AppointmentTypeController(AppDbContext db) : DashboardControllerBase(db)
 {
-    /// <summary>Returns all appointment types for the company.</summary>
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -18,22 +17,13 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
 
         var types = await Db.AppointmentTypes
             .Where(t => t.CompanyId == companyId)
+            .Include(t => t.AppointmentTypeEmployees)
             .OrderBy(t => t.DisplayName)
-            .Select(t => new AppointmentTypeListDto(
-                t.AppointmentTypeId,
-                t.Name,
-                t.DisplayName,
-                t.DurationMinutes,
-                t.WaitTime,
-                t.IsActive,
-                t.AutoTransferEnabled,
-                t.AutoTransferDepartmentId))
             .ToListAsync();
 
-        return Ok(types);
+        return Ok(types.Select(ToDto));
     }
 
-    /// <summary>Returns a single appointment type by ID.</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
@@ -42,24 +32,14 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
 
         var type = await Db.AppointmentTypes
             .Where(t => t.AppointmentTypeId == id && t.CompanyId == companyId)
-            .Select(t => new AppointmentTypeListDto(
-                t.AppointmentTypeId,
-                t.Name,
-                t.DisplayName,
-                t.DurationMinutes,
-                t.WaitTime,
-                t.IsActive,
-                t.AutoTransferEnabled,
-                t.AutoTransferDepartmentId))
+            .Include(t => t.AppointmentTypeEmployees)
             .FirstOrDefaultAsync();
 
-        if (type == null)
-            return NotFound();
+        if (type == null) return NotFound();
 
-        return Ok(type);
+        return Ok(ToDto(type));
     }
 
-    /// <summary>Creates a new appointment type for the company.</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateAppointmentTypeRequest request)
     {
@@ -73,50 +53,52 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
             DisplayName = request.DisplayName,
             DurationMinutes = request.DurationMinutes,
             WaitTime = request.WaitTime,
+            Location = request.Location,
+            TransferOnRequest = request.TransferOnRequest,
+            CallbackOnRequest = request.CallbackOnRequest,
             IsActive = true
         };
 
         Db.AppointmentTypes.Add(type);
         await Db.SaveChangesAsync();
 
-        var dto = new AppointmentTypeListDto(
-            type.AppointmentTypeId,
-            type.Name,
-            type.DisplayName,
-            type.DurationMinutes,
-            type.WaitTime,
-            type.IsActive,
-            type.AutoTransferEnabled,
-            type.AutoTransferDepartmentId);
+        await SyncEmployeesAsync(type.AppointmentTypeId, companyId, request.EmployeeIds);
 
-        return CreatedAtAction(nameof(GetById), new { id = type.AppointmentTypeId }, dto);
+        var created = await Db.AppointmentTypes
+            .Where(t => t.AppointmentTypeId == type.AppointmentTypeId)
+            .Include(t => t.AppointmentTypeEmployees)
+            .FirstAsync();
+
+        return CreatedAtAction(nameof(GetById), new { id = type.AppointmentTypeId }, ToDto(created));
     }
 
-    /// <summary>Updates an existing appointment type.</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] UpdateAppointmentTypeRequest request)
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var rows = await Db.AppointmentTypes
+        var type = await Db.AppointmentTypes
             .Where(t => t.AppointmentTypeId == id && t.CompanyId == companyId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(t => t.Name, request.Name)
-                .SetProperty(t => t.DisplayName, request.DisplayName)
-                .SetProperty(t => t.DurationMinutes, request.DurationMinutes)
-                .SetProperty(t => t.WaitTime, request.WaitTime)
-                .SetProperty(t => t.IsActive, request.IsActive)
-                .SetProperty(t => t.AutoTransferEnabled, request.AutoTransferEnabled)
-                .SetProperty(t => t.AutoTransferDepartmentId, request.AutoTransferDepartmentId));
+            .FirstOrDefaultAsync();
 
-        if (rows == 0)
-            return NotFound();
+        if (type == null) return NotFound();
+
+        type.Name = request.Name;
+        type.DisplayName = request.DisplayName;
+        type.DurationMinutes = request.DurationMinutes;
+        type.WaitTime = request.WaitTime;
+        type.IsActive = request.IsActive;
+        type.TransferOnRequest = request.TransferOnRequest;
+        type.CallbackOnRequest = request.CallbackOnRequest;
+        type.Location = request.Location;
+
+        await Db.SaveChangesAsync();
+        await SyncEmployeesAsync(id, companyId, request.EmployeeIds);
 
         return NoContent();
     }
 
-    /// <summary>Deletes an appointment type.</summary>
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long id)
     {
@@ -127,9 +109,49 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
             .Where(t => t.AppointmentTypeId == id && t.CompanyId == companyId)
             .ExecuteDeleteAsync();
 
-        if (rows == 0)
-            return NotFound();
+        if (rows == 0) return NotFound();
 
         return NoContent();
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static AppointmentTypeListDto ToDto(AppointmentType t) => new(
+        t.AppointmentTypeId,
+        t.Name,
+        t.DisplayName,
+        t.DurationMinutes,
+        t.WaitTime,
+        t.IsActive,
+        t.TransferOnRequest,
+        t.CallbackOnRequest,
+        t.AppointmentTypeEmployees.Select(e => e.EmployeeId).ToList(),
+        t.Location);
+
+    private async Task SyncEmployeesAsync(long appointmentTypeId, short companyId, List<long>? requestedIds)
+    {
+        if (requestedIds == null) return;
+
+        // Verify all requested employee IDs belong to this company
+        var validIds = await Db.Employees
+            .Where(e => e.CompanyId == companyId && requestedIds.Contains(e.EmployeeId))
+            .Select(e => e.EmployeeId)
+            .ToListAsync();
+
+        var existing = await Db.AppointmentTypeEmployees
+            .Where(x => x.AppointmentTypeId == appointmentTypeId)
+            .ToListAsync();
+
+        var toRemove = existing.Where(x => !validIds.Contains(x.EmployeeId)).ToList();
+        var toAdd = validIds
+            .Where(eid => !existing.Any(x => x.EmployeeId == eid))
+            .Select(eid => new AppointmentTypeEmployee { AppointmentTypeId = appointmentTypeId, EmployeeId = eid })
+            .ToList();
+
+        if (toRemove.Count > 0) Db.AppointmentTypeEmployees.RemoveRange(toRemove);
+        if (toAdd.Count > 0) Db.AppointmentTypeEmployees.AddRange(toAdd);
+
+        if (toRemove.Count > 0 || toAdd.Count > 0)
+            await Db.SaveChangesAsync();
     }
 }

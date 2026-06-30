@@ -75,6 +75,7 @@ public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailT
 
         Db.Employees.Add(employee);
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"Medewerker toegevoegd: {employee.Name}");
 
         var dto = new EmployeeDto(
             employee.EmployeeId,
@@ -104,6 +105,7 @@ public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailT
         if (rows == 0)
             return NotFound();
 
+        await LogAuditAsync(companyId, $"Medewerker bijgewerkt: {request.Name}");
         return NoContent();
     }
 
@@ -120,6 +122,7 @@ public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailT
 
         Db.Employees.Remove(employee);
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"Medewerker verwijderd: {employee.Name}");
 
         if (employee.Email != null)
         {

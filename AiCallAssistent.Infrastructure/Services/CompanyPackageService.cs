@@ -24,6 +24,7 @@ public class CompanyPackageService(
             return new CompanyFeatures(
                 MaxCallMinutes:       pkg.MaxCallMinutes,
                 MaxWhatsAppPerMonth:  pkg.MaxWhatsAppPerMonth,
+                AllowOverage:         pkg.AllowOverage,
                 Blacklist:            pkg.FeatureBlacklist,
                 CallbackRequests:     pkg.FeatureCallbackRequests,
                 WhatsAppConfirmation: pkg.FeatureWhatsAppConfirmation,

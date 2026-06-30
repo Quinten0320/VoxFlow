@@ -18,14 +18,23 @@ public class ReferralController(
         if (error != null) return error;
 
         var pkg = await Db.CompanyPackages.FirstOrDefaultAsync(p => p.CompanyId == companyId);
-        if (pkg == null) return NotFound(new { error = "Geen pakket gevonden." });
+        if (pkg == null)
+        {
+            pkg = new Domain.Models.CompanyPackage
+            {
+                CompanyId = companyId,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            Db.CompanyPackages.Add(pkg);
+        }
 
         if (pkg.ReferralCode == null)
         {
             pkg.ReferralCode = Guid.NewGuid().ToString("N")[..8].ToUpper();
             pkg.UpdatedAt = DateTimeOffset.UtcNow;
-            await Db.SaveChangesAsync();
         }
+
+        await Db.SaveChangesAsync();
 
         var frontendUrl = config["Frontend:Url"]?.TrimEnd('/') ?? "https://voxflow.nl";
 

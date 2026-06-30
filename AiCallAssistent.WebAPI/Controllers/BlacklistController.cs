@@ -44,6 +44,7 @@ public class BlacklistController(AppDbContext db) : DashboardControllerBase(db)
 
         Db.CallBlacklist.Add(entry);
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"Nummer geblokkeerd: {entry.PhoneNumber}");
 
         return Ok(new BlacklistEntryDto(
             entry.BlacklistId,
@@ -58,11 +59,14 @@ public class BlacklistController(AppDbContext db) : DashboardControllerBase(db)
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var rows = await Db.CallBlacklist
-            .Where(b => b.BlacklistId == id && b.CompanyId == companyId)
-            .ExecuteDeleteAsync();
+        var entry = await Db.CallBlacklist
+            .FirstOrDefaultAsync(b => b.BlacklistId == id && b.CompanyId == companyId);
+        if (entry == null) return NotFound();
 
-        if (rows == 0) return NotFound();
+        Db.CallBlacklist.Remove(entry);
+        await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"Nummer gedeblokkeerd: {entry.PhoneNumber}");
+
         return NoContent();
     }
 }
