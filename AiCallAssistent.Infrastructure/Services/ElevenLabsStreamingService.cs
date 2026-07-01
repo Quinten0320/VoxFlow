@@ -28,9 +28,10 @@ public class ElevenLabsStreamingService : IElevenLabsStreamingService
     }
 
     public async IAsyncEnumerable<byte[]> StreamAsync(
-        string text, [EnumeratorCancellation] CancellationToken ct)
+        string text, [EnumeratorCancellation] CancellationToken ct, string? voiceId = null)
     {
-        var url = $"{BaseUrl}/text-to-speech/{_settings.VoiceId}/stream"
+        var effectiveVoiceId = voiceId is { Length: > 0 } ? voiceId : _settings.VoiceId;
+        var url = $"{BaseUrl}/text-to-speech/{effectiveVoiceId}/stream"
             + $"?output_format=ulaw_8000"
             + $"&optimize_streaming_latency={_settings.OptimizeStreamingLatency}";
 

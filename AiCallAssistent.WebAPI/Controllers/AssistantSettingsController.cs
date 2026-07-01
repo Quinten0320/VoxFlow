@@ -20,6 +20,7 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
             .Where(s => s.CompanyId == companyId)
             .Select(s => new AssistantSettingsDto(
                 s.VoiceId,
+                s.VoiceKey,
                 s.Prompt,
                 s.Language,
                 s.GreetingsMessage,
@@ -62,7 +63,8 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
             Db.AssistantSettings.Add(settings);
         }
 
-        settings.VoiceId = request.VoiceId;
+        settings.VoiceId  = request.VoiceId;
+        settings.VoiceKey = request.VoiceKey;
         settings.Prompt = request.Prompt;
         settings.Language = request.Language;
         settings.GreetingsMessage = request.GreetingsMessage;

@@ -162,6 +162,7 @@ public record UpsertExceptionTimeRangeRequest(
 
 public record AssistantSettingsDto(
     long? VoiceId,
+    string? VoiceKey,
     string Prompt,
     string Language,
     string? GreetingsMessage,
@@ -184,6 +185,7 @@ public record AssistantSettingsDto(
 
 public record UpdateAssistantSettingsRequest(
     long? VoiceId,
+    string? VoiceKey,
     string Prompt,
     string Language,
     string? GreetingsMessage,

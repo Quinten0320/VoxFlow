@@ -30,7 +30,8 @@ public record CallSetupData(
     string? FallbackBehavior = null,
     string? BehaviorInstructions = null,
     string? RoutingRulesJson = null,
-    bool SubscriptionLocked = false);
+    bool SubscriptionLocked = false,
+    string? VoiceKey = null);
 
 /// <summary>All data required to process a recording turn — loaded once at the top of Recording().</summary>
 public record CallRecordingContext(

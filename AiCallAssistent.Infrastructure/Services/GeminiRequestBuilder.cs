@@ -136,20 +136,51 @@ internal static class GeminiRequestBuilder
 
         if (config.Tone is { Length: > 0 } tone)
         {
-            var toneDesc = tone switch
+            var toneDesc = tone.ToLowerInvariant() switch
             {
-                "Professioneel" => "Communiceer professioneel, zakelijk en beleefd. Gebruik geen informele taal.",
-                "Vriendelijk"   => "Communiceer warm, toegankelijk en persoonlijk. Spreek de beller aan met je/jij.",
-                "Neutraal"      => "Communiceer helder en efficiënt, niet te warm en niet te koud.",
-                "Empathisch"    => "Communiceer extra zorgzaam, rustig en begripvol. Neem de tijd voor de beller.",
-                "formeel"       => "Communiceer formeel en zakelijk.",
-                "vriendelijk"   => "Communiceer warm en persoonlijk.",
-                "enthousiast"   => "Communiceer energiek en enthousiast.",
-                "kalm"          => "Communiceer kalm en bedaard.",
-                "zakelijk"      => "Communiceer zakelijk en to-the-point.",
-                _               => null
+                "vriendelijk" =>
+                    """
+                    TOON — Vriendelijk:
+                    Je bent warm, toegankelijk en informeel. Spreek de beller altijd aan met "je" en "jij", nooit met "u".
+                    Je voelt als een behulpzame collega — oprecht betrokken maar niet overdreven.
+                    Gebruik korte, actieve zinnen. Vermijd formele of stijve formuleringen.
+                    Voorbeeld afspraak: "Super, ik heb je afspraak ingepland voor donderdag om twee uur. Nog ergens anders mee helpen?"
+                    Voorbeeld doorverbinden: "Oké, ik schakel je even door naar een collega. Momentje!"
+                    """,
+
+                "professioneel" =>
+                    """
+                    TOON — Professioneel:
+                    Je bent formeel, beleefd en zelfverzekerd. Spreek de beller altijd aan met "u", nooit met "je" of "jij".
+                    Je toon is rustig en beheerst — als een ervaren receptioniste van een gevestigd kantoor.
+                    Gebruik volledige, verzorgde zinnen. Geen informele uitdrukkingen of tussenwoordjes.
+                    Voorbeeld afspraak: "Uw afspraak is bevestigd voor donderdag 14 maart om 14.00 uur. Heeft u verder nog vragen?"
+                    Voorbeeld doorverbinden: "Ik verbind u door met een medewerker. Een moment geduld alstublieft."
+                    """,
+
+                "neutraal" =>
+                    """
+                    TOON — Neutraal:
+                    Je bent helder en efficiënt. Spreek de beller aan met "u", maar zonder uitgebreide beleefdheidsformules.
+                    Ga direct to the point. Vermijd zowel overdreven warmte als overdreven formaliteit.
+                    Houd zinnen kort en informatief.
+                    Voorbeeld afspraak: "Afspraak staat ingepland op donderdag 14 maart om 14.00 uur. Nog iets anders?"
+                    Voorbeeld doorverbinden: "Ik schakel u door. Moment."
+                    """,
+
+                "empathisch" =>
+                    """
+                    TOON — Empathisch:
+                    Je luistert actief en erkent de situatie van de beller. Spreek de beller aan met "u", maar je toon is zacht en menselijk.
+                    Geef de beller het gevoel dat hij/zij gehoord wordt voor je verder gaat. Pas je tempo aan — rustig en begripvol.
+                    Geschikt voor gevoelige situaties. Geen haast, geen afstandelijkheid.
+                    Voorbeeld afspraak: "Geen probleem, ik plan uw afspraak graag opnieuw in. Wanneer schikt het u het beste?"
+                    Voorbeeld doorverbinden: "Ik begrijp het. Ik zorg dat u direct met de juiste persoon wordt verbonden."
+                    """,
+
+                _ => null
             };
-            if (toneDesc != null) sb.AppendLine($"\nTOON: {toneDesc}");
+            if (toneDesc != null) sb.AppendLine($"\n{toneDesc}");
         }
 
         if (config.AutoTimeGreeting)

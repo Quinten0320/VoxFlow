@@ -405,7 +405,7 @@ public sealed class CallStreamHandler
         var elChunks = 0;
         try
         {
-            await foreach (var chunk in _elevenlabs.StreamAsync(sentence, playbackCt))
+            await foreach (var chunk in _elevenlabs.StreamAsync(sentence, playbackCt, _setup.VoiceKey))
             {
                 elChunks++;
                 var mem = chunk.AsMemory();
@@ -505,7 +505,7 @@ public sealed class CallStreamHandler
         _isBotSpeaking = true;
         try
         {
-            await foreach (var chunk in _elevenlabs.StreamAsync(_setup.WelcomeText, ct))
+            await foreach (var chunk in _elevenlabs.StreamAsync(_setup.WelcomeText, ct, _setup.VoiceKey))
                 await SendAudioToTwilioAsync(chunk.AsMemory(), ct);
         }
         catch (Exception ex)

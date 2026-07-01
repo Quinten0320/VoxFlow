@@ -146,6 +146,7 @@ public class CallSetupService(
         var fallbackBehavior     = assistantSettings?.FallbackBehavior;
         var behaviorInstructions = assistantSettings?.BehaviorInstructions;
         var routingRulesJson     = assistantSettings?.RoutingRules;
+        var voiceKey             = assistantSettings?.VoiceKey;
 
         bool isAfterHours = false;
         if (features.AfterHoursMode && afterHoursMode is { Length: > 0 })
@@ -226,7 +227,8 @@ public class CallSetupService(
             FallbackBehavior:      fallbackBehavior,
             BehaviorInstructions:  behaviorInstructions,
             RoutingRulesJson:      routingRulesJson,
-            SubscriptionLocked:    isSubscriptionLocked);
+            SubscriptionLocked:    isSubscriptionLocked,
+            VoiceKey:              voiceKey);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)
