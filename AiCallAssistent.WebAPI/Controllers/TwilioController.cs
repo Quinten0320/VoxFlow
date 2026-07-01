@@ -103,13 +103,9 @@ public class TwilioController : ControllerBase
                     </Response>
                     """);
             }
-            return TwimlResult("""
-                <?xml version="1.0" encoding="UTF-8"?>
-                <Response>
-                    <Say language="nl-NL">Onze telefonische assistent is momenteel niet beschikbaar. Probeer het later opnieuw.</Say>
-                    <Hangup/>
-                </Response>
-                """);
+            return await SpeakAndHangupAsync(
+                "Onze telefonische assistent is momenteel niet beschikbaar. Probeer het later opnieuw.",
+                setup.Language);
         }
 
         // Blacklist check.
@@ -597,29 +593,6 @@ public class TwilioController : ControllerBase
                 </Response>
                 """);
         }
-    }
-
-    /// <summary>Feature 2 — returns a graceful error TwiML that transfers or hangs up.</summary>
-    private static ContentResult ErrorTransferTwiml(string? escalationNumber, string language = "nl")
-    {
-        if (escalationNumber is { Length: > 0 })
-            return TwimlResult(
-                $"""
-                <?xml version="1.0" encoding="UTF-8"?>
-                <Response>
-                    <Say language="nl-NL">Er is een technisch probleem opgetreden. U wordt nu doorverbonden.</Say>
-                    <Dial>{XmlEscape(escalationNumber)}</Dial>
-                </Response>
-                """);
-
-        return TwimlResult(
-            """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <Response>
-                <Say language="nl-NL">Er is een technisch probleem opgetreden. Probeer het later opnieuw.</Say>
-                <Hangup/>
-            </Response>
-            """);
     }
 
     private static string BuildTwiml(string audioUrl, string recordingActionUrl) =>
