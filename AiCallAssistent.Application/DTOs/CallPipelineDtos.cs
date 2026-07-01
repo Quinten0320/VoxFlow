@@ -62,4 +62,5 @@ public record CompanyCallConfig(
     string[]? TopicsNo = null,
     string? FallbackBehavior = null,
     string? BehaviorInstructions = null,
-    string? RoutingRulesJson = null);
+    string? RoutingRulesJson = null,
+    string[]? ForwardWhenConditions = null);

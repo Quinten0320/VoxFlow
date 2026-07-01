@@ -700,18 +700,19 @@ public class TwilioController : ControllerBase
             var config = new CompanyCallConfig(
                 setup.SystemPrompt,
                 setup.Language,
-                GreetingMessage:      null,
-                AfterHoursMode:       null,
-                IsWhatsApp:           true,
-                AssistantName:        setup.AssistantName,
-                Tone:                 setup.Tone,
-                AutoTimeGreeting:     setup.AutoTimeGreeting,
-                UseCallerName:        setup.UseCallerName,
-                TopicsYes:            setup.TopicsYes,
-                TopicsNo:             setup.TopicsNo,
-                FallbackBehavior:     setup.FallbackBehavior,
-                BehaviorInstructions: setup.BehaviorInstructions,
-                RoutingRulesJson:     setup.RoutingRulesJson);
+                GreetingMessage:        null,
+                AfterHoursMode:         null,
+                IsWhatsApp:             true,
+                AssistantName:          setup.AssistantName,
+                Tone:                   setup.Tone,
+                AutoTimeGreeting:       setup.AutoTimeGreeting,
+                UseCallerName:          setup.UseCallerName,
+                TopicsYes:              setup.TopicsYes,
+                TopicsNo:               setup.TopicsNo,
+                FallbackBehavior:       setup.FallbackBehavior,
+                BehaviorInstructions:   setup.BehaviorInstructions,
+                RoutingRulesJson:       setup.RoutingRulesJson,
+                ForwardWhenConditions:  setup.ForwardWhenConditions);
 
             var result = await _gemini.RunConversationAsync(context, body, conversationKey, config);
 

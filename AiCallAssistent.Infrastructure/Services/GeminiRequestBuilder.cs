@@ -108,7 +108,7 @@ internal static class GeminiRequestBuilder
         writer.WritePropertyName("contents");
         writer.WriteRawValue(contentsJson);
 
-        var toolsJson = new JsonArray { dispatcher.GetToolDeclarations(context.Branch, context.Features) }.ToJsonString();
+        var toolsJson = new JsonArray { dispatcher.GetToolDeclarations(context.Branch, context.Features, config?.ForwardWhenConditions) }.ToJsonString();
         writer.WritePropertyName("tools");
         writer.WriteRawValue(toolsJson);
 
@@ -217,7 +217,35 @@ internal static class GeminiRequestBuilder
                 sb.AppendLine($"\nDOORSCHAKELREGELS PER ONDERWERP:\n{routingText}");
         }
 
+        if (config.ForwardWhenConditions is { Length: > 0 } conditions)
+        {
+            var transferRules = BuildForwardWhenSection(conditions);
+            if (transferRules is { Length: > 0 })
+                sb.AppendLine(transferRules);
+        }
+
         return sb.ToString();
+    }
+
+    private static string BuildForwardWhenSection(string[] conditions)
+    {
+        var sb = new System.Text.StringBuilder("\nDOORSCHAKELINSTRUCTIES:");
+        foreach (var condition in conditions)
+        {
+            var instruction = condition switch
+            {
+                "Als de AI de vraag niet kan beantwoorden" =>
+                    "\n- Kun je de vraag van de beller niet beantwoorden? Verbind dan onmiddellijk door via transfer_to_human — zeg niet dat je het niet weet, maar schakel direct door.",
+                "Op verzoek van de beller" =>
+                    "\n- Vraagt de beller expliciet om een medewerker of persoon? Roep dan onmiddellijk transfer_to_human aan.",
+                "Alleen bij spoed" =>
+                    "\n- Verbind ALLEEN door (via transfer_to_human) als de beller aangeeft dat het spoed is of dringend (bijv. \"spoed\", \"dringend\", \"noodgeval\"). Bij gewone vragen NIET doorverbinden.",
+                _ => null
+            };
+            if (instruction is not null)
+                sb.Append(instruction);
+        }
+        return sb.Length > "\nDOORSCHAKELINSTRUCTIES:".Length ? sb.ToString() : string.Empty;
     }
 
     private static string BuildSentimentEscalationSection(AiCallAssistent.Application.DTOs.CompanyFeatures? features)

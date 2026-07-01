@@ -148,22 +148,40 @@ public class CallSetupService(
         var routingRulesJson     = assistantSettings?.RoutingRules;
         var voiceKey             = assistantSettings?.VoiceKey;
 
-        // If no explicit escalation number from phone_numbers, check forward entries for "Buiten kantooruren"
-        if (string.IsNullOrEmpty(escalationNumber) && assistantSettings?.ForwardNumbers is { Length: > 0 } fwdJson)
+        // Parse ForwardNumbers entries: handle "Buiten kantooruren" for escalation/after-hours,
+        // and collect all other when-conditions to pass to the Gemini system prompt.
+        string[]? forwardWhenConditions = null;
+        if (assistantSettings?.ForwardNumbers is { Length: > 0 } fwdJson)
         {
             try
             {
                 var entries = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement[]>(fwdJson);
-                var afterHoursEntry = entries?.FirstOrDefault(e =>
-                    e.TryGetProperty("when", out var w) &&
-                    w.GetString()?.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase) == true);
-                if (afterHoursEntry.HasValue &&
-                    afterHoursEntry.Value.TryGetProperty("number", out var numEl) &&
-                    numEl.GetString() is { Length: > 0 } fwdNumber)
+                if (entries is { Length: > 0 })
                 {
-                    escalationNumber = fwdNumber;
-                    if (string.IsNullOrEmpty(afterHoursMode))
-                        afterHoursMode = Application.Constants.AfterHoursMode.TryHuman;
+                    var nonAfterHours = new List<string>();
+                    foreach (var entry in entries)
+                    {
+                        var when = entry.TryGetProperty("when", out var w) ? w.GetString() : null;
+                        var number = entry.TryGetProperty("number", out var n) ? n.GetString() : null;
+                        if (when?.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            if (string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
+                            {
+                                escalationNumber = number;
+                                if (string.IsNullOrEmpty(afterHoursMode))
+                                    afterHoursMode = Application.Constants.AfterHoursMode.TryHuman;
+                            }
+                        }
+                        else if (when is { Length: > 0 })
+                        {
+                            // Use number as escalation fallback if no other escalation is configured
+                            if (string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
+                                escalationNumber = number;
+                            nonAfterHours.Add(when);
+                        }
+                    }
+                    if (nonAfterHours.Count > 0)
+                        forwardWhenConditions = nonAfterHours.ToArray();
                 }
             }
             catch { /* malformed JSON — ignore */ }
@@ -250,10 +268,11 @@ public class CallSetupService(
             TopicsNo:              topicsNo,
             FallbackBehavior:      fallbackBehavior,
             BehaviorInstructions:  behaviorInstructions,
-            RoutingRulesJson:      routingRulesJson,
-            SubscriptionLocked:    isSubscriptionLocked,
-            VoiceKey:              voiceKey,
-            CompanyName:           companyName);
+            RoutingRulesJson:        routingRulesJson,
+            SubscriptionLocked:      isSubscriptionLocked,
+            VoiceKey:                voiceKey,
+            CompanyName:             companyName,
+            ForwardWhenConditions:   forwardWhenConditions);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)

@@ -258,7 +258,7 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
 
     // ── Tool declarations ────────────────────────────────────────────────────
 
-    public JsonObject GetToolDeclarations(string? branch = null, CompanyFeatures? features = null)
+    public JsonObject GetToolDeclarations(string? branch = null, CompanyFeatures? features = null, string[]? forwardWhenConditions = null)
     {
         var f = features ?? CompanyFeatures.Default;
         var declarations = new JsonArray
@@ -342,11 +342,8 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
 
         if (f.TransferToHuman)
         {
-            declarations.Add(FunctionDeclaration("transfer_to_human",
-                "Transfer the caller to a human representative when no specific department is requested. " +
-                "ONLY call this when the caller EXPLICITLY asks to speak to a person, employee, or agent. " +
-                "Never call this proactively or just because a question is difficult.",
-                new JsonObject(), []));
+            var transferDesc = BuildTransferToHumanDescription(forwardWhenConditions);
+            declarations.Add(FunctionDeclaration("transfer_to_human", transferDesc, new JsonObject(), []));
         }
 
         if (f.CallbackRequests)
@@ -380,6 +377,30 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         }
 
         return new JsonObject { ["function_declarations"] = declarations };
+    }
+
+    private static string BuildTransferToHumanDescription(string[]? forwardWhenConditions)
+    {
+        if (forwardWhenConditions is not { Length: > 0 })
+            return "Transfer the caller to a human representative when no specific department is requested. " +
+                   "ONLY call this when the caller EXPLICITLY asks to speak to a person, employee, or agent. " +
+                   "Never call this proactively or just because a question is difficult.";
+
+        var parts = new List<string> { "Transfer the caller to a human representative." };
+        foreach (var condition in forwardWhenConditions)
+        {
+            parts.Add(condition switch
+            {
+                "Als de AI de vraag niet kan beantwoorden" =>
+                    "Call this when you cannot answer the caller's question.",
+                "Op verzoek van de beller" =>
+                    "Call this when the caller explicitly asks to speak to a person or employee.",
+                "Alleen bij spoed" =>
+                    "ONLY call this when the caller explicitly indicates urgency (spoed, dringend, noodgeval). Do NOT call for regular questions.",
+                _ => null!
+            });
+        }
+        return string.Join(" ", parts.Where(p => p is not null));
     }
 
     // ── Shared helpers ───────────────────────────────────────────────────────

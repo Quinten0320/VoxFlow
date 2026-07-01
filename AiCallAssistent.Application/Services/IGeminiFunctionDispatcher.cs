@@ -12,5 +12,5 @@ public interface IGeminiFunctionDispatcher
         IConversationStore? store = null,
         string? conversationId = null);
 
-    JsonObject GetToolDeclarations(string? branch = null, CompanyFeatures? features = null);
+    JsonObject GetToolDeclarations(string? branch = null, CompanyFeatures? features = null, string[]? forwardWhenConditions = null);
 }

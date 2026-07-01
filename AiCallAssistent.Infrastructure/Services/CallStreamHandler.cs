@@ -103,9 +103,10 @@ public sealed class CallStreamHandler
             UseCallerName:        setup.UseCallerName,
             TopicsYes:            setup.TopicsYes,
             TopicsNo:             setup.TopicsNo,
-            FallbackBehavior:     setup.FallbackBehavior,
-            BehaviorInstructions: setup.BehaviorInstructions,
-            RoutingRulesJson:     setup.RoutingRulesJson);
+            FallbackBehavior:       setup.FallbackBehavior,
+            BehaviorInstructions:   setup.BehaviorInstructions,
+            RoutingRulesJson:       setup.RoutingRulesJson,
+            ForwardWhenConditions:  setup.ForwardWhenConditions);
     }
 
     // ── Entry point ──────────────────────────────────────────────────────────
