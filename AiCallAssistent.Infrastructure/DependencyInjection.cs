@@ -41,13 +41,15 @@ public static class DependencyInjection
         services.Configure<OutlookSettings>(configuration.GetSection("Outlook"));
         services.AddHttpClient<IOutlookCalendarService, OutlookCalendarService>();
 
-        // Named Twilio client carries Basic auth and is used for both recording downloads and WhatsApp.
+        // Named Twilio client carries Basic auth (AccountSid:AuthToken).
+        // AccountSid:AuthToken is accepted by all Twilio REST APIs including Verify;
+        // API Key auth is NOT accepted by the Verify API.
         services.Configure<TwilioSettings>(configuration.GetSection("Twilio"));
         services.AddHttpClient("Twilio", (sp, client) =>
         {
             var settings = sp.GetRequiredService<IOptions<TwilioSettings>>().Value;
             var credentials = Convert.ToBase64String(
-                Encoding.ASCII.GetBytes($"{settings.ApiKeySid}:{settings.ApiKeySecret}"));
+                Encoding.ASCII.GetBytes($"{settings.AccountSid}:{settings.AuthToken}"));
             client.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Basic", credentials);
         });
