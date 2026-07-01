@@ -1,3 +1,4 @@
+// Gemini streaming service with exponential backoff retry for 429/503 responses.
 using System.Buffers;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
