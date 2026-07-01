@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -39,7 +40,9 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
                 s.TopicsYes,
                 s.TopicsNo,
                 s.FallbackBehavior,
-                s.BehaviorInstructions))
+                s.BehaviorInstructions,
+                s.ForwardNumbers,
+                s.Avatar))
             .FirstOrDefaultAsync();
 
         if (settings == null)
@@ -63,6 +66,27 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
             Db.AssistantSettings.Add(settings);
         }
 
+        // Enforce forward number limit based on package plan
+        if (request.ForwardNumbers is { Length: > 2 })
+        {
+            var pkg = await Db.CompanyPackages.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.CompanyId == companyId);
+            var maxForward = pkg?.PlanName switch
+            {
+                "Start" => 1,
+                "Basis" => 2,
+                "Groei" => 5,
+                _       => 5,
+            };
+            try
+            {
+                var arr = JsonSerializer.Deserialize<JsonElement[]>(request.ForwardNumbers);
+                if (arr?.Length > maxForward)
+                    return BadRequest(new { error = $"Maximum van {maxForward} doorschakelnummer(s) bereikt voor je pakket." });
+            }
+            catch { /* invalid JSON — let it pass, DB will store as-is */ }
+        }
+
         settings.VoiceId  = request.VoiceId;
         settings.VoiceKey = request.VoiceKey;
         settings.Prompt = request.Prompt;
@@ -83,6 +107,8 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.TopicsNo             = request.TopicsNo;
         settings.FallbackBehavior     = request.FallbackBehavior;
         settings.BehaviorInstructions = request.BehaviorInstructions;
+        settings.ForwardNumbers       = request.ForwardNumbers;
+        settings.Avatar               = request.Avatar;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();

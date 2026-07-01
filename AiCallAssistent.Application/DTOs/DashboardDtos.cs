@@ -181,7 +181,9 @@ public record AssistantSettingsDto(
     string? TopicsYes,
     string? TopicsNo,
     string? FallbackBehavior,
-    string? BehaviorInstructions);
+    string? BehaviorInstructions,
+    string? ForwardNumbers,
+    string? Avatar);
 
 public record UpdateAssistantSettingsRequest(
     long? VoiceId,
@@ -203,7 +205,9 @@ public record UpdateAssistantSettingsRequest(
     string? TopicsYes = null,
     string? TopicsNo = null,
     string? FallbackBehavior = null,
-    string? BehaviorInstructions = null);
+    string? BehaviorInstructions = null,
+    string? ForwardNumbers = null,
+    string? Avatar = null);
 
 public record WhatsAppConnectRequest(string PhoneNumber);
 

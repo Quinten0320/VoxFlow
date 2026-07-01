@@ -715,9 +715,9 @@ public class StripeController(
 
     private static int? WhatsAppLimitForPlan(string? planId) => planId switch
     {
-        "Start" => 15,
-        "Basis" => 50,
-        "Groei" => 100,
+        "Start" => 25,
+        "Basis" => 100,
+        "Groei" => null,  // unlimited
         _       => null,
     };
 }

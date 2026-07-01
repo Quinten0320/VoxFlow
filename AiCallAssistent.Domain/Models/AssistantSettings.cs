@@ -115,4 +115,8 @@ public class AssistantSettings
     /// <summary>Maximum number of appointments per calendar day. Null or 0 = unlimited.</summary>
     [Column("max_appointments_per_day")]
     public int? MaxAppointmentsPerDay { get; set; }
+
+    /// <summary>Selected avatar ID, e.g. "av-sophie". Stored so it persists across sessions.</summary>
+    [Column("avatar")]
+    public string? Avatar { get; set; }
 }
