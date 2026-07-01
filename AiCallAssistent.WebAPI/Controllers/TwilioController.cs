@@ -419,23 +419,13 @@ public class TwilioController : ControllerBase
                         setup.CompanyId);
 
                     if (setup.EscalationNumber is { Length: > 0 } esc)
-                        return TwimlResult(
-                            $"""
-                            <?xml version="1.0" encoding="UTF-8"?>
-                            <Response>
-                                <Say language="nl-NL">De assistent is momenteel niet beschikbaar. U wordt doorverbonden.</Say>
-                                <Dial>{XmlEscape(esc)}</Dial>
-                            </Response>
-                            """);
+                        return await SpeakAndDialAsync(
+                            "De assistent is momenteel niet beschikbaar. U wordt doorverbonden.",
+                            esc, language: setup.Language);
 
-                    return TwimlResult(
-                        """
-                        <?xml version="1.0" encoding="UTF-8"?>
-                        <Response>
-                            <Say language="nl-NL">De assistent is momenteel niet beschikbaar. Probeer het later opnieuw.</Say>
-                            <Hangup/>
-                        </Response>
-                        """);
+                    return await SpeakAndHangupAsync(
+                        "De assistent is momenteel niet beschikbaar. Probeer het later opnieuw.",
+                        setup.Language);
                 }
             }
             catch (Exception ex)
@@ -577,6 +567,35 @@ public class TwilioController : ControllerBase
         {
             _logger.LogError(ex, "ElevenLabs synthesis failed during escalation — falling back to <Say>");
             return TwimlResult(BuildFallbackDialTwiml(text, dialNumber, fallbackNumber));
+        }
+    }
+
+    private async Task<ContentResult> SpeakAndHangupAsync(string text, string? language = null)
+    {
+        try
+        {
+            var audioBytes = await _tts.SynthesizeAsync(text, language);
+            var id = _audioStore.Store(audioBytes, "audio/mpeg");
+            return TwimlResult(
+                $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Response>
+                    <Play>{_twilio.BaseUrl}/api/twilio/audio/{id}</Play>
+                    <Hangup/>
+                </Response>
+                """);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ElevenLabs synthesis failed during hangup — falling back to <Say>");
+            return TwimlResult(
+                $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Response>
+                    <Say language="nl-NL">{XmlEscape(text)}</Say>
+                    <Hangup/>
+                </Response>
+                """);
         }
     }
 
