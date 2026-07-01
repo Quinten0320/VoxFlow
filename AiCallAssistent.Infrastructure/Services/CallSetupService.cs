@@ -148,6 +148,27 @@ public class CallSetupService(
         var routingRulesJson     = assistantSettings?.RoutingRules;
         var voiceKey             = assistantSettings?.VoiceKey;
 
+        // If no explicit escalation number from phone_numbers, check forward entries for "Buiten kantooruren"
+        if (string.IsNullOrEmpty(escalationNumber) && assistantSettings?.ForwardNumbers is { Length: > 0 } fwdJson)
+        {
+            try
+            {
+                var entries = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement[]>(fwdJson);
+                var afterHoursEntry = entries?.FirstOrDefault(e =>
+                    e.TryGetProperty("when", out var w) &&
+                    w.GetString()?.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase) == true);
+                if (afterHoursEntry.HasValue &&
+                    afterHoursEntry.Value.TryGetProperty("number", out var numEl) &&
+                    numEl.GetString() is { Length: > 0 } fwdNumber)
+                {
+                    escalationNumber = fwdNumber;
+                    if (string.IsNullOrEmpty(afterHoursMode))
+                        afterHoursMode = Application.Constants.AfterHoursMode.TryHuman;
+                }
+            }
+            catch { /* malformed JSON — ignore */ }
+        }
+
         bool isAfterHours = false;
         if (features.AfterHoursMode && afterHoursMode is { Length: > 0 })
         {
