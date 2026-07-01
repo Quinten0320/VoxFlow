@@ -23,9 +23,10 @@ public class ElevenLabsService : IElevenLabsService
         _http.DefaultRequestHeaders.Add("xi-api-key", _settings.ApiKey);
     }
 
-    public async Task<byte[]> SynthesizeAsync(string text, string? language = null)
+    public async Task<byte[]> SynthesizeAsync(string text, string? language = null, string? voiceKey = null)
     {
-        var url = $"{BaseUrl}/text-to-speech/{_settings.VoiceId}";
+        var effectiveVoiceId = voiceKey is { Length: > 0 } ? voiceKey : _settings.VoiceId;
+        var url = $"{BaseUrl}/text-to-speech/{effectiveVoiceId}";
 
         // Build payload manually so language_code is only included when the model supports it.
         // eleven_turbo_v2_5 and flash models auto-detect language and reject the parameter.

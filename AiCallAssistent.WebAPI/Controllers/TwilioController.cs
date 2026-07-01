@@ -105,7 +105,7 @@ public class TwilioController : ControllerBase
             }
             return await SpeakAndHangupAsync(
                 "Onze telefonische assistent is momenteel niet beschikbaar. Probeer het later opnieuw.",
-                setup.Language);
+                setup.Language, setup.VoiceKey);
         }
 
         // Blacklist check.
@@ -417,11 +417,11 @@ public class TwilioController : ControllerBase
                     if (setup.EscalationNumber is { Length: > 0 } esc)
                         return await SpeakAndDialAsync(
                             "De assistent is momenteel niet beschikbaar. U wordt doorverbonden.",
-                            esc, language: setup.Language);
+                            esc, language: setup.Language, voiceKey: setup.VoiceKey);
 
                     return await SpeakAndHangupAsync(
                         "De assistent is momenteel niet beschikbaar. Probeer het later opnieuw.",
-                        setup.Language);
+                        setup.Language, setup.VoiceKey);
                 }
             }
             catch (Exception ex)
@@ -437,7 +437,7 @@ public class TwilioController : ControllerBase
         {
             var noAnswerUrl = $"{_twilio.BaseUrl}/api/twilio/after-hours-no-answer"
                 + $"?calledNumber={Uri.EscapeDataString(calledNumber)}";
-            return await SpeakAndAfterHoursDialAsync(setup.WelcomeText, setup.EscalationNumber, noAnswerUrl, setup.Language);
+            return await SpeakAndAfterHoursDialAsync(setup.WelcomeText, setup.EscalationNumber, noAnswerUrl, setup.Language, setup.VoiceKey);
         }
 
         var streamTwiml = BuildStreamTwiml(calledNumber, callerNumber);
@@ -504,11 +504,11 @@ public class TwilioController : ControllerBase
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private async Task<ContentResult> SpeakAndRecordAsync(string text, string recordingActionUrl, string? language = null)
+    private async Task<ContentResult> SpeakAndRecordAsync(string text, string recordingActionUrl, string? language = null, string? voiceKey = null)
     {
         try
         {
-            var audioBytes = await _tts.SynthesizeAsync(text, language);
+            var audioBytes = await _tts.SynthesizeAsync(text, language, voiceKey);
             var id = _audioStore.Store(audioBytes, "audio/mpeg");
             var twiml = BuildTwiml($"{_twilio.BaseUrl}/api/twilio/audio/{id}", recordingActionUrl);
             _logger.LogInformation("Returning TwiML: {Twiml}", twiml);
@@ -522,11 +522,11 @@ public class TwilioController : ControllerBase
         }
     }
 
-    private async Task<ContentResult> SpeakAndAfterHoursDialAsync(string text, string dialNumber, string noAnswerUrl, string? language = null)
+    private async Task<ContentResult> SpeakAndAfterHoursDialAsync(string text, string dialNumber, string noAnswerUrl, string? language = null, string? voiceKey = null)
     {
         try
         {
-            var audioBytes = await _tts.SynthesizeAsync(text, language);
+            var audioBytes = await _tts.SynthesizeAsync(text, language, voiceKey);
             var id = _audioStore.Store(audioBytes, "audio/mpeg");
             return TwimlResult(
                 $"""
@@ -551,11 +551,11 @@ public class TwilioController : ControllerBase
         }
     }
 
-    private async Task<ContentResult> SpeakAndDialAsync(string text, string dialNumber, string? fallbackNumber = null, string? language = null)
+    private async Task<ContentResult> SpeakAndDialAsync(string text, string dialNumber, string? fallbackNumber = null, string? language = null, string? voiceKey = null)
     {
         try
         {
-            var audioBytes = await _tts.SynthesizeAsync(text, language);
+            var audioBytes = await _tts.SynthesizeAsync(text, language, voiceKey);
             var id = _audioStore.Store(audioBytes, "audio/mpeg");
             return TwimlResult(BuildDialTwiml($"{_twilio.BaseUrl}/api/twilio/audio/{id}", dialNumber, fallbackNumber));
         }
@@ -566,11 +566,11 @@ public class TwilioController : ControllerBase
         }
     }
 
-    private async Task<ContentResult> SpeakAndHangupAsync(string text, string? language = null)
+    private async Task<ContentResult> SpeakAndHangupAsync(string text, string? language = null, string? voiceKey = null)
     {
         try
         {
-            var audioBytes = await _tts.SynthesizeAsync(text, language);
+            var audioBytes = await _tts.SynthesizeAsync(text, language, voiceKey);
             var id = _audioStore.Store(audioBytes, "audio/mpeg");
             return TwimlResult(
                 $"""
