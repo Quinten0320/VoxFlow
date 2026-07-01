@@ -172,6 +172,7 @@ public class GeminiStreamingService : IGeminiStreamingService
 
         var sb = new StringBuilder();
 
+        var sseChunks = 0;
         await using (var stream = await response.Content.ReadAsStreamAsync(ct))
         using (var reader = new StreamReader(stream, Encoding.UTF8))
         {
@@ -183,11 +184,22 @@ public class GeminiStreamingService : IGeminiStreamingService
                 var json = line["data: ".Length..];
                 if (json is "[DONE]") break;
 
+                sseChunks++;
                 string? token;
                 try
                 {
                     var root = JsonNode.Parse(json);
                     token = root?["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.GetValue<string>();
+
+                    // Log non-text SSE chunks (function calls, safety blocks, finish reasons without text)
+                    if (token is null or { Length: 0 })
+                    {
+                        var finishReason = root?["candidates"]?[0]?["finishReason"]?.GetValue<string>();
+                        var hasFuncCall = root?["candidates"]?[0]?["content"]?["parts"]?[0]?["functionCall"] is not null;
+                        if (hasFuncCall || finishReason is not null)
+                            _logger.LogWarning("Gemini SSE non-text chunk for {ConversationId}: functionCall={HasFunc} finishReason={Reason}",
+                                conversationId, hasFuncCall, finishReason ?? "null");
+                    }
                 }
                 catch { continue; }
 
@@ -200,6 +212,10 @@ public class GeminiStreamingService : IGeminiStreamingService
         }
 
         response.Dispose();
+
+        if (sb.Length == 0)
+            _logger.LogWarning("Gemini SSE yielded 0 text tokens for {ConversationId} ({SseChunks} raw SSE chunks received)",
+                conversationId, sseChunks);
 
         // Persist model turn after full stream is consumed
         if (sb.Length > 0)

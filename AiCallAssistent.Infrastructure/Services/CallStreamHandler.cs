@@ -328,6 +328,15 @@ public sealed class CallStreamHandler
                     // chunk was sent (late barge-in), keep the user's transcript; otherwise drain.
                     if (!_playbackCts.IsCancellationRequested)
                         _deepgram.DrainPendingTranscripts();
+
+                    // Gemini SSE yielded 0 text tokens (function-call-only response, empty stream,
+                    // or ElevenLabs silent fail) — play a recovery prompt so the caller isn't left
+                    // in silence.
+                    if (_audioBytesThisTurn == 0)
+                    {
+                        _logger.LogWarning("[RECOVERY] 0 audio bytes produced for {CallSid} — playing retry prompt", _callSid);
+                        await PlayRetryPromptAsync(ct);
+                    }
                 }
 
                 if (result.AutoTransferNumber is { Length: > 0 } autoTransfer)
@@ -510,6 +519,29 @@ public sealed class CallStreamHandler
     }
 
     // ── Error message ────────────────────────────────────────────────────────
+
+    private async Task PlayRetryPromptAsync(CancellationToken ct)
+    {
+        const string retryText = "Kunt u dat herhalen?";
+        _suppressBargeIn = false;
+        _isBotSpeaking = true;
+        try
+        {
+            await foreach (var chunk in _elevenlabs.StreamAsync(retryText, ct))
+            {
+                if (!_isBotSpeaking) break;
+                await SendAudioToTwilioAsync(chunk.AsMemory(), ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Retry prompt synthesis failed for {CallSid}", _callSid);
+        }
+        finally
+        {
+            _isBotSpeaking = false;
+        }
+    }
 
     private async Task PlayErrorMessageAsync(CancellationToken ct)
     {
