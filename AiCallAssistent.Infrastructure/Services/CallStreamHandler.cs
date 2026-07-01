@@ -572,8 +572,22 @@ public sealed class CallStreamHandler
     // Twilio detects the WebSocket close, calls the <Connect action="..."> URL,
     // and our TwilioController.Transfer() endpoint reads the cache and returns <Dial> TwiML.
 
+    /// <summary>Converts Dutch-formatted numbers to E.164 so Twilio can dial them.</summary>
+    private static string NormalizeToE164(string number)
+    {
+        var n = number.Trim().Replace(" ", "").Replace("-", "");
+        if (n.StartsWith('+')) return n;           // already E.164
+        if (n.StartsWith("00")) return '+' + n[2..]; // 0031... → +31...
+        if (n.StartsWith("0"))  return "+31" + n[1..]; // 06... → +316...
+        return n;
+    }
+
     private async Task InitiateTransferAsync(string dialNumber, string? fallbackNumber, CancellationToken ct)
     {
+        dialNumber = NormalizeToE164(dialNumber);
+        if (fallbackNumber is { Length: > 0 })
+            fallbackNumber = NormalizeToE164(fallbackNumber);
+
         var cacheValue = fallbackNumber is { Length: > 0 }
             ? $"{dialNumber}|{fallbackNumber}"
             : dialNumber;

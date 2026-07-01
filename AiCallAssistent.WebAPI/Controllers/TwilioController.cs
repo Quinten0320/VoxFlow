@@ -350,7 +350,7 @@ public class TwilioController : ControllerBase
             return TwimlResult($"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <Response>
-                    <Dial action="{_twilio.BaseUrl}/api/twilio/dial-status" timeout="25"><Number>{XmlEscape(fallback)}</Number></Dial>
+                    <Dial action="{_twilio.BaseUrl}/api/twilio/dial-status" timeout="25"><Number>{XmlEscape(NormalizeToE164(fallback))}</Number></Dial>
                 </Response>
                 """);
         }
@@ -417,7 +417,7 @@ public class TwilioController : ControllerBase
                     if (setup.EscalationNumber is { Length: > 0 } esc)
                         return await SpeakAndDialAsync(
                             "De assistent is momenteel niet beschikbaar. U wordt doorverbonden.",
-                            esc, language: setup.Language, voiceKey: setup.VoiceKey);
+                            NormalizeToE164(esc), language: setup.Language, voiceKey: setup.VoiceKey);
 
                     return await SpeakAndHangupAsync(
                         "De assistent is momenteel niet beschikbaar. Probeer het later opnieuw.",
@@ -437,7 +437,7 @@ public class TwilioController : ControllerBase
         {
             var noAnswerUrl = $"{_twilio.BaseUrl}/api/twilio/after-hours-no-answer"
                 + $"?calledNumber={Uri.EscapeDataString(calledNumber)}";
-            return await SpeakAndAfterHoursDialAsync(setup.WelcomeText, setup.EscalationNumber, noAnswerUrl, setup.Language, setup.VoiceKey);
+            return await SpeakAndAfterHoursDialAsync(setup.WelcomeText, NormalizeToE164(setup.EscalationNumber), noAnswerUrl, setup.Language, setup.VoiceKey);
         }
 
         var streamTwiml = BuildStreamTwiml(calledNumber, callerNumber);
@@ -645,6 +645,15 @@ public class TwilioController : ControllerBase
 
     private static string XmlEscape(string text) =>
         text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+    private static string NormalizeToE164(string number)
+    {
+        var n = number.Trim().Replace(" ", "").Replace("-", "");
+        if (n.StartsWith('+')) return n;
+        if (n.StartsWith("00")) return '+' + n[2..];
+        if (n.StartsWith("0"))  return "+31" + n[1..];
+        return n;
+    }
 
     // ── Incoming WhatsApp ────────────────────────────────────────────────────
 
