@@ -203,7 +203,7 @@ public class AppointmentController(AppDbContext db, IWhatsAppService whatsApp) :
 
         await whatsApp.SendAppointmentReminderAsync(
             companyId, request.PhoneNumber,
-            companyName, appt.StartTime, displayName, appt.EmployeeName);
+            companyName, null, appt.StartTime, displayName);
 
         return NoContent();
     }
