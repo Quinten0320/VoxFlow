@@ -31,7 +31,8 @@ public record CallSetupData(
     string? BehaviorInstructions = null,
     string? RoutingRulesJson = null,
     bool SubscriptionLocked = false,
-    string? VoiceKey = null);
+    string? VoiceKey = null,
+    string? CompanyName = null);
 
 /// <summary>All data required to process a recording turn — loaded once at the top of Recording().</summary>
 public record CallRecordingContext(

@@ -49,13 +49,17 @@ public class AppointmentNotificationService(
         var tomorrowEnd = tomorrowStart.AddDays(1);
 
         // Load all candidates in one query, joining employee, company, and appointment type
-        var candidates = await db.Appointments
-            .Where(a =>
-                a.CallerPhoneNumber != null &&
-                a.ReminderSentAt == null &&
-                a.StartTime >= tomorrowStart &&
-                a.StartTime < tomorrowEnd)
-            .Select(a => new
+        var candidates = await (
+            from a in db.Appointments
+            join c in db.Companies on a.CompanyId equals c.CompanyId into cj
+            from c in cj.DefaultIfEmpty()
+            join t in db.AppointmentTypes on new { a.CompanyId, Name = a.Type } equals new { t.CompanyId, t.Name } into tj
+            from t in tj.DefaultIfEmpty()
+            where a.CallerPhoneNumber != null
+               && a.ReminderSentAt == null
+               && a.StartTime >= tomorrowStart
+               && a.StartTime < tomorrowEnd
+            select new
             {
                 a.AppointmentId,
                 a.CompanyId,
@@ -63,16 +67,10 @@ public class AppointmentNotificationService(
                 a.StartTime,
                 CallerPhoneNumber = a.CallerPhoneNumber!,
                 EmployeeName = a.Employee != null ? a.Employee.Name : string.Empty,
-                CompanyName = db.Companies
-                    .Where(c => c.CompanyId == a.CompanyId)
-                    .Select(c => c.CompanyName)
-                    .FirstOrDefault() ?? string.Empty,
-                DisplayName = db.AppointmentTypes
-                    .Where(t => t.CompanyId == a.CompanyId && t.Name == a.Type)
-                    .Select(t => t.DisplayName)
-                    .FirstOrDefault() ?? a.Type
-            })
-            .ToListAsync(ct);
+                CompanyName = c != null ? c.CompanyName : string.Empty,
+                DisplayName = t != null ? t.DisplayName : a.Type,
+            }
+        ).ToListAsync(ct);
 
         foreach (var item in candidates)
         {
@@ -83,7 +81,7 @@ public class AppointmentNotificationService(
 
                 await whatsApp.SendAppointmentReminderAsync(
                     item.CompanyId, item.CallerPhoneNumber,
-                    item.CompanyName, item.StartTime, item.DisplayName, item.EmployeeName);
+                    item.CompanyName, null, item.StartTime, item.DisplayName);
 
                 await db.Appointments
                     .Where(a => a.AppointmentId == item.AppointmentId)
@@ -104,27 +102,25 @@ public class AppointmentNotificationService(
     {
         var cutoff = nowUtc.AddHours(-2);
 
-        var candidates = await db.Appointments
-            .Where(a =>
-                a.CallerPhoneNumber != null &&
-                a.FollowupSentAt == null &&
-                a.EndTime <= cutoff)
-            .Select(a => new
+        var candidates = await (
+            from a in db.Appointments
+            join c in db.Companies on a.CompanyId equals c.CompanyId into cj
+            from c in cj.DefaultIfEmpty()
+            join t in db.AppointmentTypes on new { a.CompanyId, Name = a.Type } equals new { t.CompanyId, t.Name } into tj
+            from t in tj.DefaultIfEmpty()
+            where a.CallerPhoneNumber != null
+               && a.FollowupSentAt == null
+               && a.EndTime <= cutoff
+            select new
             {
                 a.AppointmentId,
                 a.CompanyId,
                 a.Type,
                 CallerPhoneNumber = a.CallerPhoneNumber!,
-                CompanyName = db.Companies
-                    .Where(c => c.CompanyId == a.CompanyId)
-                    .Select(c => c.CompanyName)
-                    .FirstOrDefault() ?? string.Empty,
-                DisplayName = db.AppointmentTypes
-                    .Where(t => t.CompanyId == a.CompanyId && t.Name == a.Type)
-                    .Select(t => t.DisplayName)
-                    .FirstOrDefault() ?? a.Type
-            })
-            .ToListAsync(ct);
+                CompanyName = c != null ? c.CompanyName : string.Empty,
+                DisplayName = t != null ? t.DisplayName : a.Type,
+            }
+        ).ToListAsync(ct);
 
         foreach (var item in candidates)
         {
@@ -135,7 +131,7 @@ public class AppointmentNotificationService(
 
                 await whatsApp.SendAppointmentFollowupAsync(
                     item.CompanyId, item.CallerPhoneNumber,
-                    item.CompanyName, item.DisplayName);
+                    item.CompanyName, null);
 
                 await db.Appointments
                     .Where(a => a.AppointmentId == item.AppointmentId)

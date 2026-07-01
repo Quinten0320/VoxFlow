@@ -89,7 +89,8 @@ public sealed class CallStreamHandler
             setup.EscalationNumber,
             setup.DepartmentPhones,
             setup.Branch,
-            setup.Features);
+            setup.Features,
+            setup.CompanyName);
 
         _callConfig = new CompanyCallConfig(
             SystemPrompt:         setup.SystemPrompt,

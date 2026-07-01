@@ -144,20 +144,42 @@ public class GeminiStreamingService : IGeminiStreamingService
         var url = $"{EndpointBase}/{_settings.Model}:streamGenerateContent?alt=sse";
         var requestBytes = GeminiRequestBuilder.BuildRequestBytes(contentsJson, context, config, _dispatcher, _settings);
 
-        using var httpContent = new ByteArrayContent(requestBytes);
-        httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = httpContent };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-
-        HttpResponseMessage response;
-        try
+        int[] sseDelays = [0, 3, 7];
+        HttpResponseMessage? response = null;
+        for (var attempt = 0; attempt < sseDelays.Length; attempt++)
         {
-            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (attempt > 0)
+                await Task.Delay(TimeSpan.FromSeconds(sseDelays[attempt]), ct);
+
+            var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Content = new ByteArrayContent(requestBytes);
+            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+            try
+            {
+                response = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Gemini SSE request failed for {ConversationId}", conversationId);
+                yield break;
+            }
+
+            if ((int)response.StatusCode is 429 or 503)
+            {
+                _logger.LogWarning("Gemini SSE {Status} on attempt {Attempt}, retrying…",
+                    (int)response.StatusCode, attempt + 1);
+                response.Dispose();
+                response = null;
+                continue;
+            }
+            break;
         }
-        catch (Exception ex)
+
+        if (response is null)
         {
-            _logger.LogError(ex, "Gemini SSE request failed for {ConversationId}", conversationId);
+            _logger.LogError("Gemini SSE unavailable after retries for {ConversationId}", conversationId);
             yield break;
         }
 
@@ -235,10 +257,11 @@ public class GeminiStreamingService : IGeminiStreamingService
         var token = await _tokenProvider.GetAccessTokenAsync(ct);
         var url = $"{EndpointBase}/{_settings.Model}:generateContent";
 
-        for (var attempt = 0; attempt < 3; attempt++)
+        int[] batchDelays = [0, 5, 10, 20];
+        for (var attempt = 0; attempt < batchDelays.Length; attempt++)
         {
             if (attempt > 0)
-                await Task.Delay(TimeSpan.FromSeconds(attempt * 2), ct);
+                await Task.Delay(TimeSpan.FromSeconds(batchDelays[attempt]), ct);
 
             using var request = new HttpRequestMessage(HttpMethod.Post, url);
             request.Content = new ByteArrayContent(requestBytes);
@@ -270,7 +293,7 @@ public class GeminiStreamingService : IGeminiStreamingService
             return GeminiBatchResult.Ok(firstPart);
         }
 
-        return GeminiBatchResult.Fail("Gemini API unavailable after 3 attempts.");
+        return GeminiBatchResult.Fail("Gemini API unavailable after 4 attempts.");
     }
 
     private static GeminiStreamResult ErrorResult(string error) =>

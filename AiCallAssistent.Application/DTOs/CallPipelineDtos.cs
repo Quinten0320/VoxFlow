@@ -41,7 +41,8 @@ public record CallDispatchContext(
     string? EscalationNumber,
     IReadOnlyDictionary<string, string>? DepartmentPhones = null,
     string? Branch = null,
-    CompanyFeatures? Features = null);
+    CompanyFeatures? Features = null,
+    string? CompanyName = null);
 
 /// <summary>
 /// Company-specific settings loaded once per call from assistant_settings.

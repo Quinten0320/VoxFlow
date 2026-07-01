@@ -160,16 +160,19 @@ public class CallSetupService(
         string? greetingOverride  = null;
         var welcomeText = await BuildWelcomeTextAsync(
             companyId, isAfterHours, afterHoursMode, escalationNumber,
-            effectiveSettings, greetingOverride, autoTimeGreeting);
+            effectiveSettings, greetingOverride, autoTimeGreeting, tone);
 
         string? branch = null;
+        string? companyName = null;
         try
         {
-            branch = await db.Companies
+            var company = await db.Companies
                 .AsNoTracking()
                 .Where(c => c.CompanyId == companyId)
-                .Select(c => c.Branch)
+                .Select(c => new { c.Branch, c.CompanyName })
                 .FirstOrDefaultAsync();
+            branch = company?.Branch;
+            companyName = company?.CompanyName;
         }
         catch (Exception ex)
         {
@@ -228,7 +231,8 @@ public class CallSetupService(
             BehaviorInstructions:  behaviorInstructions,
             RoutingRulesJson:      routingRulesJson,
             SubscriptionLocked:    isSubscriptionLocked,
-            VoiceKey:              voiceKey);
+            VoiceKey:              voiceKey,
+            CompanyName:           companyName);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)
@@ -315,7 +319,7 @@ public class CallSetupService(
     private async Task<string> BuildWelcomeTextAsync(
         short companyId, bool isAfterHours, string? afterHoursMode,
         string? escalationNumber, Domain.Models.AssistantSettings? assistantSettings,
-        string? greetingOverride = null, bool autoTimeGreeting = false)
+        string? greetingOverride = null, bool autoTimeGreeting = false, string? tone = null)
     {
         if (isAfterHours)
         {
@@ -328,13 +332,6 @@ public class CallSetupService(
                 _   => "Goed dat u belt! We zijn momenteel gesloten. U kunt mij een terugbelverzoek achterlaten, dan nemen wij zo snel mogelijk contact met u op."
             };
         }
-
-        // Profile greeting takes precedence over base assistant settings greeting.
-        if (greetingOverride is { Length: > 0 })
-            return autoTimeGreeting ? PrependTimeGreeting(greetingOverride) : greetingOverride;
-
-        if (assistantSettings?.GreetingsMessage is { Length: > 0 } greeting)
-            return autoTimeGreeting ? PrependTimeGreeting(greeting) : greeting;
 
         var companyName = "ons bedrijf";
         try
@@ -350,6 +347,27 @@ public class CallSetupService(
         {
             logger.LogWarning(ex, "Could not load company name for company {CompanyId}", companyId);
         }
+
+        // Tone-based hardcoded greeting takes priority over custom greeting.
+        if (tone is { Length: > 0 })
+        {
+            var timeGreet = NlTimeZone.Now.Hour switch { < 12 => "Goedemorgen", < 18 => "Goedemiddag", _ => "Goedeavond" };
+            return tone.ToLowerInvariant() switch
+            {
+                "vriendelijk"   => $"{timeGreet}, je spreekt met de virtuele assistent van {companyName}. Waarmee kan ik je helpen vandaag?",
+                "professioneel" => $"{timeGreet}, u spreekt met de virtuele assistent van {companyName}. Hoe kan ik u van dienst zijn?",
+                "neutraal"      => $"{timeGreet}, u spreekt met de virtuele assistent van {companyName}. Hoe kan ik u helpen?",
+                "empathisch"    => $"{timeGreet}, u spreekt met de virtuele assistent van {companyName}. Waarmee kan ik u helpen?",
+                _               => $"{timeGreet}, u spreekt met de virtuele assistent van {companyName}. Hoe kan ik u helpen?",
+            };
+        }
+
+        // Fallback: custom greeting or default.
+        if (greetingOverride is { Length: > 0 })
+            return autoTimeGreeting ? PrependTimeGreeting(greetingOverride) : greetingOverride;
+
+        if (assistantSettings?.GreetingsMessage is { Length: > 0 } greeting)
+            return autoTimeGreeting ? PrependTimeGreeting(greeting) : greeting;
 
         var fallback = _assistant.WelcomeMessage.Replace("{company}", companyName);
         return autoTimeGreeting ? PrependTimeGreeting(fallback) : fallback;

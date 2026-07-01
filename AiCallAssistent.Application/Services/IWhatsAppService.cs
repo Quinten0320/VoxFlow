@@ -10,17 +10,17 @@ public interface IWhatsAppService
     Task SendForCompanyAsync(short companyId, string toNumber, string message, string messageType);
 
     Task SendAppointmentConfirmationAsync(short companyId, string toNumber,
-        DateTimeOffset startTime, string serviceType, string employeeName);
+        string companyName, string? callerName, DateTimeOffset startTime, string serviceType);
 
     Task SendAppointmentReminderAsync(short companyId, string toNumber,
-        string companyName, DateTimeOffset startTime, string serviceType, string employeeName);
+        string companyName, string? callerName, DateTimeOffset startTime, string serviceType);
 
     Task SendAppointmentDayReminderAsync(short companyId, string toNumber,
-        string companyName, DateTimeOffset startTime, string serviceType, string employeeName);
+        string companyName, string? callerName, DateTimeOffset startTime, string serviceType);
 
     Task SendCallbackConfirmationAsync(short companyId, string toNumber,
-        string callerName, DateTimeOffset scheduledFrom, DateTimeOffset scheduledUntil);
+        string? callerName);
 
     Task SendAppointmentFollowupAsync(short companyId, string toNumber,
-        string companyName, string serviceType);
+        string companyName, string? callerName);
 }

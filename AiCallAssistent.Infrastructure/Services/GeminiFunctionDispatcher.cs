@@ -126,7 +126,9 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         {
             await whatsApp.SendAppointmentConfirmationAsync(
                 context.CompanyId, context.CallerNumber,
-                result.StartTime, result.Type, result.EmployeeName);
+                context.CompanyName ?? string.Empty,
+                request.CustomerName,
+                result.StartTime, result.Type);
         }
 
         return result;
@@ -230,7 +232,7 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         {
             await whatsApp.SendCallbackConfirmationAsync(
                 context.CompanyId, context.CallerNumber,
-                callerName, scheduledFrom, scheduledUntil);
+                callerName);
         }
 
         return new { success = true, callback_request_id = id, message = "Callback request scheduled." };
