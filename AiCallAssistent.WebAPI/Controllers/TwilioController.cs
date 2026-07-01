@@ -344,16 +344,26 @@ public class TwilioController : ControllerBase
     [ValidateTwilioRequest]
     public IActionResult DialStatus([FromQuery] string? fallback)
     {
-        var dialStatus = Request.Form["DialCallStatus"].ToString();
+        var dialStatus   = Request.Form["DialCallStatus"].ToString();
+        var calledNumber = Request.Form["Called"].ToString();
+        var callerNumber = Request.Form["From"].ToString();
 
         if (fallback is { Length: > 0 } && dialStatus is "no-answer" or "busy" or "failed" or "canceled")
         {
+            // Try the fallback number; on no-answer it will hit dial-status again (without fallback) → bot resumes
             return TwimlResult($"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <Response>
-                    <Dial>{XmlEscape(fallback)}</Dial>
+                    <Dial action="{_twilio.BaseUrl}/api/twilio/dial-status" timeout="25"><Number>{XmlEscape(fallback)}</Number></Dial>
                 </Response>
                 """);
+        }
+
+        // Transfer went unanswered — resume bot so it can help plan a callback
+        if (dialStatus is "no-answer" or "busy" or "failed" or "canceled")
+        {
+            _logger.LogInformation("Transfer unanswered for {CalledNumber} — resuming bot for callback", calledNumber);
+            return TwimlResult(BuildStreamTwiml(calledNumber, callerNumber, transferNoAnswer: true));
         }
 
         return TwimlResult("""<?xml version="1.0" encoding="UTF-8"?><Response></Response>""");
@@ -465,9 +475,11 @@ public class TwilioController : ControllerBase
             var parts    = entry.Split('|');
             var number   = parts[0];
             var fallback = parts.Length > 1 ? parts[1] : null;
-            var dialTag  = fallback is { Length: > 0 }
-                ? $"""<Dial action="{_twilio.BaseUrl}/api/twilio/dial-status?fallback={Uri.EscapeDataString(fallback)}" timeout="25"><Number>{XmlEscape(number)}</Number></Dial>"""
-                : $"<Dial>{XmlEscape(number)}</Dial>";
+            // Always include action URL so Twilio calls back on no-answer → bot resumes for callback
+            var actionUrl = fallback is { Length: > 0 }
+                ? $"{_twilio.BaseUrl}/api/twilio/dial-status?fallback={Uri.EscapeDataString(fallback)}"
+                : $"{_twilio.BaseUrl}/api/twilio/dial-status";
+            var dialTag = $"""<Dial action="{actionUrl}" timeout="25"><Number>{XmlEscape(number)}</Number></Dial>""";
             var twiml = $"""<?xml version="1.0" encoding="UTF-8"?><Response>{dialTag}</Response>""";
 
             _logger.LogInformation("Transfer action triggered for {CallSid} → {Number}", callSid, number);
@@ -478,14 +490,16 @@ public class TwilioController : ControllerBase
         return TwimlResult("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>");
     }
 
-    private string BuildStreamTwiml(string calledNumber, string callerNumber, bool afterHoursNoAnswer = false)
+    private string BuildStreamTwiml(string calledNumber, string callerNumber, bool afterHoursNoAnswer = false, bool transferNoAnswer = false)
     {
         var wsUrl = _twilio.BaseUrl.Replace("https://", "wss://", StringComparison.OrdinalIgnoreCase)
             + "/ws/twilio";
 
         var extraParam = afterHoursNoAnswer
             ? $"\n                    <Parameter name=\"noAnswer\" value=\"1\"/>"
-            : "";
+            : transferNoAnswer
+                ? $"\n                    <Parameter name=\"transferNoAnswer\" value=\"1\"/>"
+                : "";
 
         var transferActionUrl = $"{_twilio.BaseUrl}/api/twilio/transfer";
 

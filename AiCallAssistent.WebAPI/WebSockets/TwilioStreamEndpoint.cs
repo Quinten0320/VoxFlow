@@ -61,10 +61,11 @@ public static class TwilioStreamEndpoint
             var customParams = startRoot?["start"]?["customParameters"];
             var calledNumber = customParams?["calledNumber"]?.GetValue<string>() ?? "";
             var callerNumber = customParams?["callerNumber"]?.GetValue<string>() ?? "";
-            var noAnswer     = customParams?["noAnswer"]?.GetValue<string>() == "1";
+            var noAnswer         = customParams?["noAnswer"]?.GetValue<string>() == "1";
+            var transferNoAnswer = customParams?["transferNoAnswer"]?.GetValue<string>() == "1";
 
-            logger.LogInformation("Stream start: callSid={CallSid} calledNumber={CalledNumber} noAnswer={NoAnswer}",
-                callSid, calledNumber, noAnswer);
+            logger.LogInformation("Stream start: callSid={CallSid} calledNumber={CalledNumber} noAnswer={NoAnswer} transferNoAnswer={TransferNoAnswer}",
+                callSid, calledNumber, noAnswer, transferNoAnswer);
 
             if (string.IsNullOrEmpty(callSid))
             {
@@ -89,6 +90,10 @@ public static class TwilioStreamEndpoint
             // After-hours no-answer: escalation didn't pick up, bot takes over with appropriate greeting
             if (noAnswer)
                 setup = setup with { WelcomeText = "Helaas is niemand beschikbaar. Ik kan u helpen een terugbelverzoek in te plannen." };
+
+            // Transfer no-answer: the person being called didn't pick up; bot resumes to take a callback request
+            if (transferNoAnswer)
+                setup = setup with { WelcomeText = "De lijn was helaas bezet of er werd niet opgenomen. Ik kan u helpen een terugbelverzoek in te plannen, zodat u zo snel mogelijk wordt teruggebeld." };
 
             var deepgram      = sp.GetRequiredService<IDeepgramStreamingService>();
             var elevenlabs    = sp.GetRequiredService<IElevenLabsStreamingService>();
