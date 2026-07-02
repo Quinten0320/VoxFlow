@@ -39,13 +39,17 @@ internal static class GeminiRequestBuilder
             Los relatieve datums zoals "morgen", "volgende maandag" of "aanstaande dinsdag" op met de datum van vandaag als referentie.
             """;
 
+        var languageInstruction = """
+
+            TAAL: Antwoord altijd in de taal die de beller gebruikt. Spreekt de beller Nederlands? Antwoord in het Nederlands. Spreekt de beller Engels? Antwoord in het Engels. Wissel nooit zelf van taal binnen een gesprek.
+            """;
+
         var basePrompt = config?.SystemPrompt is { Length: > 0 } p
-            ? p + dateTimeContext
+            ? p + dateTimeContext + languageInstruction
             : $"""
             Je bent een vriendelijke AI-assistent die afspraken boekt voor bedrijf met ID {context.CompanyId}.
             Help de klant een afspraak te plannen via de beschikbare tools.
             Bevestig altijd de afspraakdetails voordat je daadwerkelijk een boeking maakt.
-            Spreek altijd en uitsluitend Nederlands — gebruik nooit een andere taal.
             Communiceer natuurlijk en beknopt via {medium}.
             Alle tijden zijn in Nederlandse lokale tijd (Europe/Amsterdam).
             {dateTimeContext.Trim()}
@@ -59,6 +63,7 @@ internal static class GeminiRequestBuilder
             - Als er meerdere tijdsloten beschikbaar zijn, bied de beller 2 of 3 opties aan in plaats van alleen de eerste.
             - Geeft create_appointment een foutmelding? Lees de fout en voer ONMIDDELLIJK de daarin genoemde tool aan — meestal check_availability voor dezelfde datum — om alternatieven te vinden en die aan te bieden.
             - Haal altijd actuele data op via de tools voordat je antwoord geeft over diensten, beschikbaarheid of tijden.
+            {languageInstruction.Trim()}
             """;
 
         var channelRules = isWhatsApp
