@@ -34,20 +34,28 @@ public class AppointmentService : IAppointmentService
 
     public async Task<List<AppointmentTypeDto>> GetAppointmentTypesAsync(short companyId)
     {
-        return await _db.AppointmentTypes
+        var types = await _db.AppointmentTypes
             .Where(t => t.CompanyId == companyId && t.IsActive)
             .OrderBy(t => t.DisplayName)
-            .Select(t => new AppointmentTypeDto
-            {
-                Name = t.Name,
-                DisplayName = t.DisplayName,
-                DurationMinutes = t.DurationMinutes,
-                WaitTime = t.WaitTime,
-                TransferOnRequest = t.TransferOnRequest,
-                CallbackOnRequest = t.CallbackOnRequest,
-                TransferOutsideHours = t.TransferOutsideHours,
-            })
             .ToListAsync();
+
+        return types.Select(t => new AppointmentTypeDto
+        {
+            Name = t.Name,
+            DisplayName = t.DisplayName,
+            DurationMinutes = t.DurationMinutes,
+            WaitTime = t.WaitTime,
+            TransferOnRequest = t.TransferOnRequest,
+            CallbackOnRequest = t.CallbackOnRequest,
+            TransferOutsideHours = t.TransferOutsideHours,
+            Location = t.Location,
+            CancellationPolicy = t.CancellationPolicy,
+            UrgentAlwaysForward = t.UrgentAlwaysForward,
+            AfterHoursMode = t.AfterHoursMode,
+            AvailableDays = ParseDays(t.AvailableDays),
+            AvailableFrom = t.AvailableFrom,
+            AvailableTo = t.AvailableTo,
+        }).ToList();
     }
 
     public async Task<AppointmentResponse> CreateAppointmentAsync(CreateAppointmentRequest request)
@@ -194,6 +202,23 @@ public class AppointmentService : IAppointmentService
             .FirstOrDefaultAsync(t => t.CompanyId == companyId && t.Name == type && t.IsActive)
             ?? throw new ArgumentException($"Afspraaktype '{type}' is niet beschikbaar. Roep get_appointment_types aan voor de juiste naam.");
 
+        // Check type-specific day restriction
+        var allowedDays = ParseDays(typeConfig.AvailableDays);
+        if (allowedDays is { Length: > 0 } && !allowedDays.Contains(ToDutchDay(date.DayOfWeek)))
+        {
+            _logger.LogInformation("GetAvailability: {Date} ({Day}) not in AvailableDays for type {Type} — returning empty", date, date.DayOfWeek, type);
+            return new AvailabilityResponse
+            {
+                CompanyId = companyId, Type = type,
+                Date = date.ToString("yyyy-MM-dd"),
+                DurationMinutes = typeConfig.DurationMinutes,
+                AvailableSlots = []
+            };
+        }
+
+        TimeOnly? typeFrom = typeConfig.AvailableFrom is { Length: > 0 } af && TimeOnly.TryParse(af, out var tf) ? tf : null;
+        TimeOnly? typeTo   = typeConfig.AvailableTo   is { Length: > 0 } at && TimeOnly.TryParse(at, out var tt) ? tt : null;
+
         var ranges = await _openingHours.GetOpeningRangesForDateAsync(companyId, date);
         if (ranges.Count == 0)
         {
@@ -224,7 +249,7 @@ public class AppointmentService : IAppointmentService
         foreach (var employee in employees)
         {
             var employeeSlots = bookedSlots.Where(a => a.EmployeeId == employee.Id).ToList();
-            var slots = GenerateSlots(date, ranges, employeeSlots, typeConfig.DurationMinutes, bufferMinutes);
+            var slots = GenerateSlots(date, ranges, employeeSlots, typeConfig.DurationMinutes, bufferMinutes, typeFrom, typeTo);
 
             availableSlots.AddRange(slots.Select(s => new TimeSlotResponse
             {
@@ -276,12 +301,20 @@ public class AppointmentService : IAppointmentService
             .Select(s => s.BufferMinutes ?? 0)
             .FirstOrDefaultAsync();
 
+        var allowedDays = ParseDays(typeConfig.AvailableDays);
+        TimeOnly? typeFrom = typeConfig.AvailableFrom is { Length: > 0 } af && TimeOnly.TryParse(af, out var tf) ? tf : null;
+        TimeOnly? typeTo   = typeConfig.AvailableTo   is { Length: > 0 } at && TimeOnly.TryParse(at, out var tt) ? tt : null;
+
         var nowNl = NlTimeZone.Now;
         var todayNl = DateOnly.FromDateTime(nowNl.DateTime);
 
         for (var dayOffset = typeConfig.WaitTime; dayOffset < 60 + typeConfig.WaitTime; dayOffset++)
         {
             var checkDate = todayNl.AddDays(dayOffset);
+
+            if (allowedDays is { Length: > 0 } && !allowedDays.Contains(ToDutchDay(checkDate.DayOfWeek)))
+                continue;
+
             var ranges = await _openingHours.GetOpeningRangesForDateAsync(companyId, checkDate);
             if (ranges.Count == 0) continue;
 
@@ -293,7 +326,7 @@ public class AppointmentService : IAppointmentService
             foreach (var employee in employees)
             {
                 var employeeSlots = bookedSlots.Where(a => a.EmployeeId == employee.Id).ToList();
-                var slots = GenerateSlots(checkDate, ranges, employeeSlots, typeConfig.DurationMinutes, bufferMinutes);
+                var slots = GenerateSlots(checkDate, ranges, employeeSlots, typeConfig.DurationMinutes, bufferMinutes, typeFrom, typeTo);
 
                 var validSlots = dayOffset == 0
                     ? slots.Where(s => s.Start > nowNl).ToList()
@@ -417,15 +450,22 @@ public class AppointmentService : IAppointmentService
         List<(TimeOnly Start, TimeOnly End)> ranges,
         List<BookedSlot> bookedSlots,
         int durationMinutes,
-        int bufferMinutes = 0)
+        int bufferMinutes = 0,
+        TimeOnly? typeFrom = null,
+        TimeOnly? typeTo = null)
     {
         var slots = new List<(DateTimeOffset Start, DateTimeOffset End)>();
         var buffer = TimeSpan.FromMinutes(bufferMinutes);
 
         foreach (var range in ranges)
         {
-            var current  = NlTimeZone.ToDateTimeOffset(date, range.Start);
-            var rangeEnd = NlTimeZone.ToDateTimeOffset(date, range.End);
+            // Intersect the opening range with the per-type time window
+            var effectiveStart = typeFrom.HasValue && typeFrom.Value > range.Start ? typeFrom.Value : range.Start;
+            var effectiveEnd   = typeTo.HasValue   && typeTo.Value   < range.End   ? typeTo.Value   : range.End;
+            if (effectiveStart >= effectiveEnd) continue;
+
+            var current  = NlTimeZone.ToDateTimeOffset(date, effectiveStart);
+            var rangeEnd = NlTimeZone.ToDateTimeOffset(date, effectiveEnd);
 
             while (true)
             {
@@ -443,6 +483,25 @@ public class AppointmentService : IAppointmentService
 
         return slots.OrderBy(s => s.Start).ToList();
     }
+
+    private static string[] ? ParseDays(string? json)
+    {
+        if (json is not { Length: > 0 }) return null;
+        try { return System.Text.Json.JsonSerializer.Deserialize<string[]>(json); }
+        catch { return null; }
+    }
+
+    private static string ToDutchDay(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Monday    => "Ma",
+        DayOfWeek.Tuesday   => "Di",
+        DayOfWeek.Wednesday => "Wo",
+        DayOfWeek.Thursday  => "Do",
+        DayOfWeek.Friday    => "Vr",
+        DayOfWeek.Saturday  => "Za",
+        DayOfWeek.Sunday    => "Zo",
+        _                   => ""
+    };
 
     private async Task<List<EmployeeInfo>> GetActiveEmployeesAsync(short companyId, long appointmentTypeId)
     {

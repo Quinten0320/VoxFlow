@@ -63,6 +63,12 @@ internal static class GeminiRequestBuilder
             - Als er meerdere tijdsloten beschikbaar zijn, bied de beller 2 of 3 opties aan in plaats van alleen de eerste.
             - Geeft create_appointment een foutmelding? Lees de fout en voer ONMIDDELLIJK de daarin genoemde tool aan — meestal check_availability voor dezelfde datum — om alternatieven te vinden en die aan te bieden.
             - Haal altijd actuele data op via de tools voordat je antwoord geeft over diensten, beschikbaarheid of tijden.
+
+            AFSPRAAKTYPE-VELDEN (uit get_appointment_types):
+            - location: Vertel de beller de locatie direct nadat de afspraak is bevestigd.
+            - cancellationPolicy: Noem het annuleringsbeleid direct nadat de afspraak is bevestigd.
+            - urgentAlwaysForward: true → schakel de beller ALTIJD onmiddellijk door via transfer_to_human, ook buiten openingstijden — ongeacht de globale instelling.
+            - afterHoursMode: Overschrijft de globale buiten-ureninstelling voor dit specifieke type. "A" = probeer door te schakelen (transfer_to_human); "B" = alleen terugbelverzoek (schedule_callback). null = gebruik de globale instelling.
             {languageInstruction.Trim()}
             """;
 
@@ -90,6 +96,7 @@ internal static class GeminiRequestBuilder
                 Jouw enige taak is het inplannen van een terugbelverzoek via schedule_callback.
                 Roep altijd eerst get_opening_hours aan zodat je de beller kunt vertellen wanneer we beschikbaar zijn.
                 Bevestig het terugbelvenster met de beller voordat je schedule_callback aanroept.
+                UITZONDERING: Als het gevraagde afspraaktype urgentAlwaysForward=true heeft of een eigen afterHoursMode heeft, gebruik dan die instelling in plaats van deze globale regel.
                 """,
             AiCallAssistent.Application.Constants.AfterHoursMode.FullService =>
                 """
