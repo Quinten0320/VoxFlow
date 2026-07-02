@@ -3,6 +3,7 @@ using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Infrastructure;
 using AiCallAssistent.WebAPI.WebSockets;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi.Models;
 
@@ -141,6 +142,11 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "AiCallAssistent Web API");
     });
 }
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+});
 
 if (app.Environment.IsDevelopment())
 {
