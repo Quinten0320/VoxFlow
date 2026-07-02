@@ -560,6 +560,32 @@ public class EmailTemplateService
             {Cta("Bekijk gesprekken", DashboardUrl + "/gesprekken")}
             """));
 
+    public (string Subject, string Html) OwnerQuestionAnswered(
+        string companyName, string? callerPhone, string? summary) =>
+        ("Klantvraag volledig beantwoord", Layout(
+            "Uw assistent heeft een gesprek zelfstandig afgehandeld.",
+            $"""
+            <p>Uw VoxFlow-assistent heeft zojuist een gesprek volledig zelfstandig afgehandeld — er is geen afspraak of terugbelverzoek aangemaakt.</p>
+            <div class="stats"><table>
+              {(callerPhone is { Length: > 0 } ? $"<tr><td>Beller</td><td>{callerPhone}</td></tr>" : "")}
+              {(summary is { Length: > 0 } ? $"<tr><td>Samenvatting</td><td>{summary}</td></tr>" : "")}
+            </table></div>
+            {Cta("Bekijk gesprekken", DashboardUrl + "/gesprekken")}
+            """));
+
+    public (string Subject, string Html) OwnerNewLead(
+        string companyName, string? callerPhone, string? summary) =>
+        ("Nieuwe lead via VoxFlow", Layout(
+            "Een nieuwe klant heeft uw assistent gebeld.",
+            $"""
+            <p>Uw VoxFlow-assistent heeft voor het eerst contact gehad met een nieuwe klant.</p>
+            <div class="stats"><table>
+              {(callerPhone is { Length: > 0 } ? $"<tr><td>Telefoonnummer</td><td>{callerPhone}</td></tr>" : "")}
+              {(summary is { Length: > 0 } ? $"<tr><td>Samenvatting</td><td>{summary}</td></tr>" : "")}
+            </table></div>
+            {Cta("Bekijk gesprekken", DashboardUrl + "/gesprekken")}
+            """));
+
     // ── AVG / data lifecycle ──────────────────────────────────────────────────
 
     public (string Subject, string Html) SubscriptionExpiredWarning(string naam, int daysLeft) =>

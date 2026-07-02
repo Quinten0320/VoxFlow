@@ -445,18 +445,6 @@ public class CallSetupService(
         string? escalationNumber, Domain.Models.AssistantSettings? assistantSettings,
         string? greetingOverride = null, bool autoTimeGreeting = false, string? tone = null)
     {
-        if (isAfterHours)
-        {
-            return afterHoursMode switch
-            {
-                AfterHoursMode.TryHuman when escalationNumber is { Length: > 0 }
-                    => "Goed dat u belt! We zijn momenteel gesloten. Ik probeer u door te verbinden met een van onze medewerkers.",
-                AfterHoursMode.FullService
-                    => "Goed dat u belt! We zijn momenteel gesloten, maar ik kan u gewoon verder helpen. Ik kan een afspraak voor u inplannen of een terugbelverzoek vastleggen.",
-                _   => "Goed dat u belt! We zijn momenteel gesloten. U kunt mij een terugbelverzoek achterlaten, dan nemen wij zo snel mogelijk contact met u op."
-            };
-        }
-
         var companyName = "ons bedrijf";
         try
         {

@@ -77,6 +77,8 @@ public class EmailPreviewController(
             "integration_expired"      => templates.IntegrationExpired("Jan de Vries", "Microsoft Outlook"),
             "integration_notify_confirm" => templates.IntegrationNotifyConfirm("Jan de Vries", "Exact Online"),
             "integration_now_live"     => templates.IntegrationNowLive("Jan de Vries", "Exact Online"),
+            "owner_question_answered"  => templates.OwnerQuestionAnswered("De Vries Loodgieters", "+31612345678", "Klant vroeg naar de openingstijden en prijzen voor een lekkage reparatie."),
+            "owner_new_lead"           => templates.OwnerNewLead("De Vries Loodgieters", "+31687654321", "Eerste contact: klant wil een offerte voor badkamerrenovatie."),
             "whatsapp_activated"       => templates.WhatsAppActivated("Jan de Vries", "+31970123456"),
             "referral_success"         => templates.ReferralSuccess("Jan de Vries", "Kees Smit"),
             "referral_rewarded"        => templates.ReferralRewarded("Jan de Vries", "29,90"),

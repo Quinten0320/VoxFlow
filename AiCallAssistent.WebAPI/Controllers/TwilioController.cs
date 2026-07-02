@@ -341,6 +341,90 @@ public class TwilioController : ControllerBase
                     }
                 });
             }
+
+            // Post-call notifications: "Klantvraag beantwoord" and "Nieuwe lead ontvangen"
+            var notifSession = session;
+            var notifCallType = callType;
+            var notifCallSid  = callSid;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope      = _scopeFactory.CreateScope();
+                    var scopedDb         = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var templates        = scope.ServiceProvider.GetRequiredService<AiCallAssistent.Infrastructure.Services.Email.EmailTemplateService>();
+                    var emailSender      = scope.ServiceProvider.GetRequiredService<AiCallAssistent.Infrastructure.Services.Email.EmailSender>();
+                    var openingHours     = scope.ServiceProvider.GetRequiredService<AiCallAssistent.Application.Services.IOpeningHoursService>();
+
+                    var settings = await scopedDb.AssistantSettings
+                        .AsNoTracking()
+                        .Where(s => s.CompanyId == notifSession.CompanyId)
+                        .FirstOrDefaultAsync();
+
+                    if (settings?.NotificationConfig is not { Length: > 0 } nc) return;
+
+                    string[]? notifTopics = null;
+                    bool notifyOutsideHours = false;
+                    try
+                    {
+                        var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(nc);
+                        if (parsed.TryGetProperty("topics", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            notifTopics = t.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
+                        if (parsed.TryGetProperty("notifyOutsideHours", out var noh) && noh.ValueKind == System.Text.Json.JsonValueKind.True)
+                            notifyOutsideHours = true;
+                    }
+                    catch { }
+
+                    if (notifTopics is not { Length: > 0 }) return;
+
+                    var ownerEmail = await scopedDb.Employees
+                        .AsNoTracking()
+                        .Where(e => e.CompanyId == notifSession.CompanyId && e.IsOwner && e.Email != null)
+                        .Select(e => e.Email)
+                        .FirstOrDefaultAsync();
+
+                    if (ownerEmail == null) return;
+
+                    bool isOpen;
+                    try { isOpen = await openingHours.IsCompanyOpenAsync(notifSession.CompanyId); }
+                    catch { isOpen = true; }
+
+                    if (!isOpen && !notifyOutsideHours) return;
+
+                    var companyName = await scopedDb.Companies
+                        .AsNoTracking()
+                        .Where(c => c.CompanyId == notifSession.CompanyId)
+                        .Select(c => c.CompanyName ?? "Bedrijf")
+                        .FirstOrDefaultAsync() ?? "Bedrijf";
+
+                    if (notifCallType == "Info" && notifSession.Summary is { Length: > 0 } &&
+                        notifTopics.Contains("Klantvraag beantwoord", StringComparer.OrdinalIgnoreCase))
+                    {
+                        var (subject, html) = templates.OwnerQuestionAnswered(companyName, notifSession.CallerNumber, notifSession.Summary);
+                        await emailSender.SendNowAsync(notifSession.CompanyId, ownerEmail, companyName, "owner_question_answered", subject, html);
+                    }
+
+                    if (notifTopics.Contains("Nieuwe lead ontvangen", StringComparer.OrdinalIgnoreCase) &&
+                        notifSession.CallerNumber is { Length: > 0 } callerNum)
+                    {
+                        var prevCalls = await scopedDb.CallSessions
+                            .AsNoTracking()
+                            .CountAsync(s => s.CompanyId == notifSession.CompanyId
+                                          && s.CallerNumber == callerNum
+                                          && s.CallSid != notifCallSid);
+
+                        if (prevCalls == 0)
+                        {
+                            var (subject, html) = templates.OwnerNewLead(companyName, callerNum, notifSession.Summary);
+                            await emailSender.SendNowAsync(notifSession.CompanyId, ownerEmail, companyName, "owner_new_lead", subject, html);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Post-call notifications failed for {CallSid}", notifCallSid);
+                }
+            });
         }
         catch (Exception ex)
         {
