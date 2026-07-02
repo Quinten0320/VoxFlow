@@ -204,9 +204,24 @@ public class TwilioController : ControllerBase
         var callSid    = Request.Form["CallSid"].ToString();
         var dialStatus = Request.Form["DialCallStatus"].ToString();
 
-        // Human picked up — nothing left to do.
+        // Human picked up — mark call as transferred and hang up.
         if (dialStatus is "completed" or "answered")
+        {
+            try
+            {
+                var transferred = await _db.CallSessions.FindAsync(callSid);
+                if (transferred != null && transferred.CallType is null or "Info")
+                {
+                    transferred.CallType = "Transfer";
+                    await _db.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not mark transfer for {CallSid}", callSid);
+            }
             return TwimlResult("""<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>""");
+        }
 
         // Human didn't answer — hand off to the bot.
         var setup = await _callSetup.LoadAsync(calledNumber, callerNumber);
