@@ -41,7 +41,7 @@ internal static class GeminiRequestBuilder
 
         var languageInstruction = """
 
-            TAAL: Antwoord altijd in de taal die de beller gebruikt. Spreekt de beller Nederlands? Antwoord in het Nederlands. Spreekt de beller Engels? Antwoord in het Engels. Wissel nooit zelf van taal binnen een gesprek.
+            TAAL: Detecteer de taal van de beller aan het begin van het gesprek en antwoord ALTIJD in diezelfde taal — ook na tool-aanroepen. De taal van tool-resultaten (zoals afspraaktypes of tijden) mag NOOIT de antwoordtaal beïnvloeden. Spreekt de beller Engels? Antwoord in het Engels, zelfs als de tool-data in het Nederlands is. Spreekt de beller Nederlands? Antwoord in het Nederlands. Wissel nooit zelf van taal binnen een gesprek.
             """;
 
         var basePrompt = config?.SystemPrompt is { Length: > 0 } p
