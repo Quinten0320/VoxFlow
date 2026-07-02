@@ -284,7 +284,22 @@ public class TwilioController : ControllerBase
             var turns = _conversations.Load(callSid);
             var transcript = BuildTranscript(turns);
 
-            var callType = _conversations.GetCallOutcome(callSid) ?? "Info";
+            // Prefer in-memory outcome (set during the call); fall back to DB evidence
+            // so multi-instance deployments don't lose the outcome.
+            var callType = _conversations.GetCallOutcome(callSid);
+            if (callType == null)
+            {
+                var since = session.StartedAt.AddMinutes(-1);
+                var hasAppointment = await _db.Appointments
+                    .AnyAsync(a => a.CompanyId == session.CompanyId
+                        && a.CreatedAt >= since
+                        && (session.CallerNumber == null || a.CallerPhoneNumber == session.CallerNumber));
+                var hasCallback = await _db.CallbackRequests
+                    .AnyAsync(r => r.CompanyId == session.CompanyId
+                        && r.CreatedAt >= since
+                        && (session.CallerNumber == null || r.CallerNumber == session.CallerNumber));
+                callType = hasAppointment ? "Appointment" : hasCallback ? "Callback" : "Info";
+            }
 
             var durationSec = (int)(DateTimeOffset.UtcNow - session.StartedAt).TotalSeconds;
 
