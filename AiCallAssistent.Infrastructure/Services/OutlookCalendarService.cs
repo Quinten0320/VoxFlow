@@ -62,10 +62,11 @@ public class OutlookCalendarService(
             }
         };
 
-        httpClient.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", accessToken);
+        using var createRequest = new HttpRequestMessage(HttpMethod.Post, GraphEventsUrl);
+        createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        createRequest.Content = JsonContent.Create(body);
 
-        var response = await httpClient.PostAsJsonAsync(GraphEventsUrl, body);
+        var response = await httpClient.SendAsync(createRequest);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -84,19 +85,26 @@ public class OutlookCalendarService(
         var accessToken = await GetValidAccessTokenAsync(companyId);
         if (accessToken == null) return [];
 
-        httpClient.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", accessToken);
-
-        httpClient.DefaultRequestHeaders.Remove("Prefer");
-        httpClient.DefaultRequestHeaders.Add("Prefer", "outlook.timezone=\"UTC\"");
-
         var url = "https://graph.microsoft.com/v1.0/me/calendarView" +
                   $"?startDateTime={from.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}" +
                   $"&endDateTime={to.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}" +
                   "&$select=subject,start,end,bodyPreview" +
                   "&$top=500";
 
-        var json = await httpClient.GetFromJsonAsync<JsonElement>(url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Add("Prefer", "outlook.timezone=\"UTC\"");
+
+        using var httpResponse = await httpClient.SendAsync(request);
+        if (!httpResponse.IsSuccessStatusCode)
+        {
+            var errorBody = await httpResponse.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"Microsoft Graph calendarView {(int)httpResponse.StatusCode}: {errorBody}",
+                null, httpResponse.StatusCode);
+        }
+
+        var json = await httpResponse.Content.ReadFromJsonAsync<JsonElement>();
         if (!json.TryGetProperty("value", out var valueEl)) return [];
 
         var events = new List<OutlookEventDto>();

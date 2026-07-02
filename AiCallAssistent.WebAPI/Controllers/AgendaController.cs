@@ -38,6 +38,7 @@ public class AgendaController(AppDbContext db, IOutlookCalendarService outlookCa
             .ToListAsync();
 
         List<AgendaEventDto> outlookEvents = [];
+        string? outlookError = null;
         try
         {
             var graphEvents = await outlookCalendar.GetEventsAsync(companyId, from, to);
@@ -53,9 +54,9 @@ public class AgendaController(AppDbContext db, IOutlookCalendarService outlookCa
                     null))
                 .ToList();
         }
-        catch
+        catch (Exception ex)
         {
-            // not connected or token error — return DB-only results
+            outlookError = ex.Message;
         }
 
         var dbEvents = dbAppointments.Select(x => new AgendaEventDto(
@@ -73,6 +74,6 @@ public class AgendaController(AppDbContext db, IOutlookCalendarService outlookCa
             .OrderBy(e => e.Start)
             .ToList();
 
-        return Ok(merged);
+        return Ok(new { items = merged, outlookError });
     }
 }
