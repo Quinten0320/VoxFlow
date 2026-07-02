@@ -75,12 +75,11 @@ public class GeminiStreamingService : IGeminiStreamingService
 
             if (part["text"] is not null)
             {
-                // Pre-save so the status-callback summarizer always has data even if the SSE
-                // stream is abandoned mid-way (e.g. caller hangs up while bot is speaking).
+                var batchText = part["text"]!.GetValue<string>();
+                contents.Add(GeminiRequestBuilder.ModelTextTurn(batchText));
                 _conversations.Save(conversationId, contents);
-                _logger.LogDebug("Gemini streaming text for {ConversationId}", conversationId);
-                var textStream = StreamSseResponseAsync(contentsJson, context, config, contents, conversationId, ct);
-                return new GeminiStreamResult(true, null, textStream, pendingEscalation, pendingFallback, pendingAutoTransfer);
+                _logger.LogDebug("Gemini batch text for {ConversationId}: {Chars} chars", conversationId, batchText.Length);
+                return new GeminiStreamResult(true, null, YieldTextAsync(batchText, ct), pendingEscalation, pendingFallback, pendingAutoTransfer);
             }
 
             if (part["functionCall"] is JsonObject functionCall)
@@ -295,6 +294,14 @@ public class GeminiStreamingService : IGeminiStreamingService
         }
 
         return GeminiBatchResult.Fail("Gemini API unavailable after 4 attempts.");
+    }
+
+    private static async IAsyncEnumerable<string> YieldTextAsync(string text,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        if (!ct.IsCancellationRequested && text.Length > 0)
+            yield return text;
+        await Task.CompletedTask;
     }
 
     private static GeminiStreamResult ErrorResult(string error) =>
