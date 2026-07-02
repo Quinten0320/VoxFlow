@@ -69,9 +69,10 @@ public class AgendaController(AppDbContext db, IOutlookCalendarService outlookCa
             x.EmployeeName,
             x.Appointment.CallerPhoneNumber));
 
-        var dbStartTimes = dbEvents.Select(e => e.Start).ToHashSet();
-        var uniqueOutlookEvents = outlookEvents
-            .Where(e => !dbStartTimes.Any(db => Math.Abs((db - e.Start).TotalMinutes) < 2));
+        var uniqueOutlookEvents = outlookEvents.Where(outlookEv =>
+            !dbEvents.Any(dbEv =>
+                Math.Abs((dbEv.Start - outlookEv.Start).TotalMinutes) < 2 &&
+                outlookEv.Title.StartsWith(dbEv.Title, StringComparison.OrdinalIgnoreCase)));
 
         var merged = dbEvents
             .Concat(uniqueOutlookEvents)
