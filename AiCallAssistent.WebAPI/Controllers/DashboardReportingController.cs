@@ -9,9 +9,7 @@ namespace AiCallAssistent.WebAPI.Controllers;
 [Route("api/dashboard")]
 public class DashboardReportingController(AppDbContext db) : DashboardControllerBase(db)
 {
-    private static readonly string[] DayAbbr = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
-
-    /// <summary>
+/// <summary>
     /// Returns reporting data for the dashboard.
     /// range: vandaag | week | maand (default: week)
     /// </summary>
@@ -47,13 +45,24 @@ public class DashboardReportingController(AppDbContext db) : DashboardController
             })
             .ToListAsync();
 
-        // CallsPerDay — group by NL day-of-week (Mon=0..Sun=6)
-        var callsByDow = sessions
-            .GroupBy(s => (int)NlTimeZone.ConvertFromUtc(s.StartedAt).DayOfWeek)
-            .ToDictionary(g => (g.Key + 6) % 7, g => g.Count()); // convert Sunday=0 to index 6
+        // CallsPerDay — group by actual NL calendar date, fill in zeros for missing days
+        var callsByDate = sessions
+            .GroupBy(s => DateOnly.FromDateTime(NlTimeZone.ConvertFromUtc(s.StartedAt).DateTime))
+            .ToDictionary(g => g.Key, g => g.Count());
 
-        var callsPerDay = DayAbbr
-            .Select((abbr, i) => new DayCallCountDto(abbr, callsByDow.TryGetValue(i, out var n) ? n : 0))
+        int spanDays = range switch
+        {
+            "vandaag" => 1,
+            "7d"      => 7,
+            "90d"     => 90,
+            _         => 30,
+        };
+
+        var callsPerDay = Enumerable.Range(0, spanDays)
+            .Select(i => todayNl.AddDays(i - (spanDays - 1)))
+            .Select(d => new DayCallCountDto(
+                d.ToString("dd/MM"),
+                callsByDate.TryGetValue(d, out var n) ? n : 0))
             .ToList();
 
         // CallTypeDistribution
@@ -63,8 +72,9 @@ public class DashboardReportingController(AppDbContext db) : DashboardController
             .OrderByDescending(x => x.Value)
             .ToList();
 
-        // PeakHeatmap — hours 8-19, by NL day
-        var peakHeatmap = DayAbbr.Select((abbr, dowIdx) =>
+        // PeakHeatmap — hours 8-19, by NL day-of-week (pattern view, separate from callsPerDay)
+        string[] dayAbbr = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
+        var peakHeatmap = dayAbbr.Select((abbr, dowIdx) =>
         {
             var cells = Enumerable.Range(8, 12).Select(hour =>
             {
