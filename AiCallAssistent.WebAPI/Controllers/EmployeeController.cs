@@ -89,23 +89,26 @@ public class EmployeeController(AppDbContext db, EmailSender emailSender, EmailT
         return CreatedAtAction(nameof(GetById), new { id = employee.EmployeeId }, dto);
     }
 
-    /// <summary>Updates an existing employee.</summary>
+    /// <summary>Updates an existing employee. IsActive is only changed when explicitly supplied in the request body.</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] UpdateEmployeeRequest request)
     {
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var rows = await Db.Employees
-            .Where(e => e.EmployeeId == id && e.CompanyId == companyId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(e => e.Name, request.Name)
-                .SetProperty(e => e.IsOwner, request.IsOwner)
-                .SetProperty(e => e.IsActive, request.IsActive));
+        var employee = await Db.Employees
+            .FirstOrDefaultAsync(e => e.EmployeeId == id && e.CompanyId == companyId);
 
-        if (rows == 0)
+        if (employee == null)
             return NotFound();
 
+        employee.Name = request.Name;
+        employee.IsOwner = request.IsOwner;
+        // Only update IsActive when the caller explicitly passes it (non-null); preserve existing value otherwise.
+        if (request.IsActive.HasValue)
+            employee.IsActive = request.IsActive.Value;
+
+        await Db.SaveChangesAsync();
         await LogAuditAsync(companyId, $"Medewerker bijgewerkt: {request.Name}");
         return NoContent();
     }

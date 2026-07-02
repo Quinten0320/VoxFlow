@@ -57,6 +57,13 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
             TransferOnRequest = request.TransferOnRequest,
             CallbackOnRequest = request.CallbackOnRequest,
             TransferOutsideHours = request.TransferOutsideHours,
+            AfterHoursMode = request.AfterHoursMode,
+            UrgentAlwaysForward = request.UrgentAlwaysForward,
+            Price = request.Price,
+            CancellationPolicy = request.CancellationPolicy,
+            AvailableDays = request.AvailableDays,
+            AvailableFrom = request.AvailableFrom,
+            AvailableTo = request.AvailableTo,
             IsActive = true
         };
 
@@ -94,6 +101,13 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
         type.CallbackOnRequest = request.CallbackOnRequest;
         type.TransferOutsideHours = request.TransferOutsideHours;
         type.Location = request.Location;
+        type.AfterHoursMode = request.AfterHoursMode;
+        type.UrgentAlwaysForward = request.UrgentAlwaysForward;
+        type.Price = request.Price;
+        type.CancellationPolicy = request.CancellationPolicy;
+        type.AvailableDays = request.AvailableDays;
+        type.AvailableFrom = request.AvailableFrom;
+        type.AvailableTo = request.AvailableTo;
 
         await Db.SaveChangesAsync();
         await SyncEmployeesAsync(id, companyId, request.EmployeeIds);
@@ -129,7 +143,14 @@ public class AppointmentTypeController(AppDbContext db) : DashboardControllerBas
         t.CallbackOnRequest,
         t.TransferOutsideHours,
         t.AppointmentTypeEmployees.Select(e => e.EmployeeId).ToList(),
-        t.Location);
+        t.Location,
+        t.AfterHoursMode,
+        t.UrgentAlwaysForward,
+        t.Price,
+        t.CancellationPolicy,
+        t.AvailableDays,
+        t.AvailableFrom,
+        t.AvailableTo);
 
     private async Task SyncEmployeesAsync(long appointmentTypeId, short companyId, List<long>? requestedIds)
     {

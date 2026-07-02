@@ -43,6 +43,34 @@ public class AppointmentType
     [Column("transfer_outside_hours")]
     public bool TransferOutsideHours { get; set; } = false;
 
+    /// <summary>After-hours behaviour for this type: "A" = transfer+callback, "B" = callback only. Overrides global setting when set.</summary>
+    [Column("after_hours_mode")]
+    public string? AfterHoursMode { get; set; }
+
+    /// <summary>When true, an urgent topic always triggers a live transfer even outside opening hours.</summary>
+    [Column("urgent_always_forward")]
+    public bool UrgentAlwaysForward { get; set; } = false;
+
+    /// <summary>Price in euros, used for revenue insights in reporting.</summary>
+    [Column("price", TypeName = "numeric(10,2)")]
+    public decimal? Price { get; set; }
+
+    /// <summary>Free-text cancellation policy shown to callers.</summary>
+    [Column("cancellation_policy")]
+    public string? CancellationPolicy { get; set; }
+
+    /// <summary>JSON array of weekday abbreviations when this type can be booked, e.g. ["Ma","Di","Wo","Do","Vr"].</summary>
+    [Column("available_days", TypeName = "jsonb")]
+    public string? AvailableDays { get; set; }
+
+    /// <summary>Earliest time this type can be booked (HH:mm), e.g. "09:00".</summary>
+    [Column("available_from")]
+    public string? AvailableFrom { get; set; }
+
+    /// <summary>Latest time this type can be booked (HH:mm), e.g. "17:00".</summary>
+    [Column("available_to")]
+    public string? AvailableTo { get; set; }
+
     [ForeignKey(nameof(CompanyId))]
     public Company? Company { get; set; }
 

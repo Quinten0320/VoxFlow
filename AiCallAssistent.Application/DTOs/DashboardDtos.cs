@@ -24,7 +24,7 @@ public record EmployeeDto(
 
 public record CreateEmployeeRequest(string Name, bool IsOwner);
 
-public record UpdateEmployeeRequest(string Name, bool IsOwner, bool IsActive);
+public record UpdateEmployeeRequest(string Name, bool IsOwner, bool? IsActive = null);
 
 public record AppointmentTypeListDto(
     long AppointmentTypeId,
@@ -37,7 +37,14 @@ public record AppointmentTypeListDto(
     bool CallbackOnRequest,
     bool TransferOutsideHours,
     List<long> EmployeeIds,
-    string? Location);
+    string? Location,
+    string? AfterHoursMode = null,
+    bool UrgentAlwaysForward = false,
+    decimal? Price = null,
+    string? CancellationPolicy = null,
+    string? AvailableDays = null,
+    string? AvailableFrom = null,
+    string? AvailableTo = null);
 
 public record CreateAppointmentTypeRequest(
     string Name,
@@ -48,7 +55,14 @@ public record CreateAppointmentTypeRequest(
     string? Location = null,
     bool TransferOnRequest = false,
     bool CallbackOnRequest = false,
-    bool TransferOutsideHours = false);
+    bool TransferOutsideHours = false,
+    string? AfterHoursMode = null,
+    bool UrgentAlwaysForward = false,
+    decimal? Price = null,
+    string? CancellationPolicy = null,
+    string? AvailableDays = null,
+    string? AvailableFrom = null,
+    string? AvailableTo = null);
 
 public record UpdateAppointmentTypeRequest(
     string Name,
@@ -60,7 +74,14 @@ public record UpdateAppointmentTypeRequest(
     bool CallbackOnRequest = false,
     bool TransferOutsideHours = false,
     List<long>? EmployeeIds = null,
-    string? Location = null);
+    string? Location = null,
+    string? AfterHoursMode = null,
+    bool UrgentAlwaysForward = false,
+    decimal? Price = null,
+    string? CancellationPolicy = null,
+    string? AvailableDays = null,
+    string? AvailableFrom = null,
+    string? AvailableTo = null);
 
 public record AppointmentDto(
     long AppointmentId,

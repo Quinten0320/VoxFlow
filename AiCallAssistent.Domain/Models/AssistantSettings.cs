@@ -116,6 +116,10 @@ public class AssistantSettings
     [Column("max_appointments_per_day")]
     public int? MaxAppointmentsPerDay { get; set; }
 
+    /// <summary>Buffer time in minutes between consecutive appointments. 0 = no buffer.</summary>
+    [Column("buffer_minutes")]
+    public int? BufferMinutes { get; set; }
+
     /// <summary>Selected avatar ID, e.g. "av-sophie". Stored so it persists across sessions.</summary>
     [Column("avatar")]
     public string? Avatar { get; set; }

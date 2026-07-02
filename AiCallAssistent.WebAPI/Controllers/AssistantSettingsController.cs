@@ -127,12 +127,12 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         var (companyId, error) = await GetCompanyIdAsync();
         if (error != null) return error;
 
-        var maxPerDay = await Db.AssistantSettings
+        var row = await Db.AssistantSettings
             .Where(s => s.CompanyId == companyId)
-            .Select(s => (int?)s.MaxAppointmentsPerDay)
+            .Select(s => new { s.MaxAppointmentsPerDay, s.BufferMinutes })
             .FirstOrDefaultAsync();
 
-        return Ok(new { maxPerDay });
+        return Ok(new { maxPerDay = row?.MaxAppointmentsPerDay, bufferMinutes = row?.BufferMinutes ?? 0 });
     }
 
     [HttpPut("appointment-limits")]
@@ -150,6 +150,7 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
 
         // 0 treated as unlimited (same as null)
         settings.MaxAppointmentsPerDay = request.MaxPerDay is null or 0 ? null : request.MaxPerDay;
+        settings.BufferMinutes = request.BufferMinutes is null or 0 ? null : request.BufferMinutes;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();
@@ -157,4 +158,4 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
     }
 }
 
-public record UpdateAppointmentLimitsRequest(int? MaxPerDay);
+public record UpdateAppointmentLimitsRequest(int? MaxPerDay, int? BufferMinutes = null);
