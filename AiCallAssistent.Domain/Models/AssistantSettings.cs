@@ -119,4 +119,12 @@ public class AssistantSettings
     /// <summary>Selected avatar ID, e.g. "av-sophie". Stored so it persists across sessions.</summary>
     [Column("avatar")]
     public string? Avatar { get; set; }
+
+    /// <summary>"altijd" = bot always answers during hours, "niemand" = bot only answers if nobody picks up.</summary>
+    [Column("routing_during_hours")]
+    public string? RoutingDuringHours { get; set; }
+
+    /// <summary>"altijd" = bot always answers outside hours, "niemand" = bot only answers if nobody picks up.</summary>
+    [Column("routing_after_hours")]
+    public string? RoutingAfterHours { get; set; }
 }

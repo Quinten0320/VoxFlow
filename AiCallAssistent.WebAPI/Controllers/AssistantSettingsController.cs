@@ -42,7 +42,9 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
                 s.FallbackBehavior,
                 s.BehaviorInstructions,
                 s.ForwardNumbers,
-                s.Avatar))
+                s.Avatar,
+                s.RoutingDuringHours,
+                s.RoutingAfterHours))
             .FirstOrDefaultAsync();
 
         if (settings == null)
@@ -109,6 +111,8 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.BehaviorInstructions = request.BehaviorInstructions;
         settings.ForwardNumbers       = request.ForwardNumbers;
         settings.Avatar               = request.Avatar;
+        settings.RoutingDuringHours   = request.RoutingDuringHours;
+        settings.RoutingAfterHours    = request.RoutingAfterHours;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();

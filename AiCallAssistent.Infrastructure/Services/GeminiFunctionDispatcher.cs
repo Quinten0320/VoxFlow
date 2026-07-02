@@ -3,6 +3,7 @@ using AiCallAssistent.Application.Constants;
 using AiCallAssistent.Application.DTOs;
 using AiCallAssistent.Application.Helpers;
 using AiCallAssistent.Application.Services;
+using AiCallAssistent.Infrastructure.Services.Email;
 
 namespace AiCallAssistent.Infrastructure.Services;
 
@@ -29,7 +30,9 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         IOpeningHoursService openingHours,
         IWhatsAppService whatsApp,
         ICallbackService callbacks,
-        IPropertyInfoProvider propertyInfo)
+        IPropertyInfoProvider propertyInfo,
+        EmailSender emailSender,
+        EmailTemplateService emailTemplates)
     {
         _handlers = new Dictionary<string, Func<CallDispatchContext, JsonNode?, Task<object>>>
         {
@@ -46,7 +49,7 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
                     args?["until_time"]?.GetValue<string>()),
 
             ["create_appointment"] = async (ctx, args) =>
-                await CreateAppointmentAsync(ctx, args, appointments, whatsApp),
+                await CreateAppointmentAsync(ctx, args, appointments, whatsApp, openingHours, emailSender, emailTemplates),
 
             ["cancel_appointment"] = async (ctx, args) =>
                 await CancelAppointmentAsync(ctx, args, appointments),
@@ -57,17 +60,17 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
             ["get_departments"] = async (ctx, _) =>
                 await departments.GetDepartmentsAsync(ctx.CompanyId),
 
-            ["transfer_to_department"] = (ctx, args) =>
-                Task.FromResult(TransferToDepartment(ctx, Arg(args, "department_name"))),
+            ["transfer_to_department"] = async (ctx, args) =>
+                await TransferToDepartmentAsync(ctx, Arg(args, "department_name"), openingHours, emailSender, emailTemplates),
 
-            ["transfer_to_human"] = (ctx, _) =>
-                Task.FromResult(TransferToHuman(ctx)),
+            ["transfer_to_human"] = async (ctx, _) =>
+                await TransferToHumanAsync(ctx, openingHours, emailSender, emailTemplates),
 
             ["get_opening_hours"] = async (ctx, args) =>
                 await GetOpeningHoursAsync(ctx.CompanyId, args, openingHours),
 
             ["schedule_callback"] = async (ctx, args) =>
-                await ScheduleCallbackAsync(ctx, args, callbacks, whatsApp),
+                await ScheduleCallbackAsync(ctx, args, callbacks, whatsApp, openingHours, emailSender, emailTemplates),
 
             ["get_property_info"] = async (_, args) =>
                 await GetPropertyInfoAsync(args, propertyInfo),
@@ -90,9 +93,9 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         {
             var outcome = functionName switch
             {
-                "create_appointment"   => "Afspraak ingepland",
-                "schedule_callback"    => "Terugbelverzoek",
-                "transfer_to_department" or "transfer_to_human" => "Doorgeschakeld",
+                "create_appointment"   => "Appointment",
+                "schedule_callback"    => "Callback",
+                "transfer_to_department" or "transfer_to_human" => "Transfer",
                 _ => null
             };
             if (outcome != null)
@@ -106,7 +109,8 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
 
     private static async Task<object> CreateAppointmentAsync(
         CallDispatchContext context, JsonNode? args,
-        IAppointmentService appointments, IWhatsAppService whatsApp)
+        IAppointmentService appointments, IWhatsAppService whatsApp,
+        IOpeningHoursService openingHours, EmailSender emailSender, EmailTemplateService emailTemplates)
     {
         var request = new CreateAppointmentRequest
         {
@@ -122,7 +126,8 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         var result = await appointments.CreateAppointmentAsync(request);
 
         var features = context.Features ?? CompanyFeatures.Default;
-        if (features.WhatsAppConfirmation && !string.IsNullOrWhiteSpace(context.CallerNumber))
+        var sendAppointmentConfirm = context.AutoMessageFlags?.GetValueOrDefault("appointment_confirmation", true) ?? true;
+        if (features.WhatsAppConfirmation && sendAppointmentConfirm && !string.IsNullOrWhiteSpace(context.CallerNumber))
         {
             await whatsApp.SendAppointmentConfirmationAsync(
                 context.CompanyId, context.CallerNumber,
@@ -130,6 +135,12 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
                 request.CustomerName,
                 result.StartTime, result.Type);
         }
+
+        await SendOwnerNotificationAsync(context, "Nieuwe afspraak ingepland", "owner_appointment_created",
+            openingHours, emailSender, isUrgent: false,
+            () => emailTemplates.OwnerAppointmentCreated(
+                context.CompanyName ?? string.Empty, request.CustomerName,
+                request.Type, result.StartTime, context.CallerNumber));
 
         return result;
     }
@@ -180,19 +191,36 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         }
     }
 
-    private static object TransferToDepartment(CallDispatchContext context, string departmentName)
+    private static async Task<object> TransferToDepartmentAsync(
+        CallDispatchContext context, string departmentName,
+        IOpeningHoursService openingHours, EmailSender emailSender, EmailTemplateService emailTemplates)
     {
-        if (context.DepartmentPhones?.ContainsKey(departmentName) == true)
-            return new { success = true, message = $"Transferring call to the {departmentName} department." };
+        if (context.DepartmentPhones?.ContainsKey(departmentName) != true)
+            return new { success = false, error = $"Department '{departmentName}' is not available." };
 
-        return new { success = false, error = $"Department '{departmentName}' is not available." };
+        await SendOwnerNotificationAsync(context, "Gesprek doorgestuurd", "owner_transfer",
+            openingHours, emailSender, isUrgent: false,
+            () => emailTemplates.OwnerTransfer(context.CompanyName ?? string.Empty, context.CallerNumber, departmentName));
+
+        return new { success = true, message = $"Transferring call to the {departmentName} department." };
     }
 
-    private static object TransferToHuman(CallDispatchContext context)
+    private static async Task<object> TransferToHumanAsync(
+        CallDispatchContext context,
+        IOpeningHoursService openingHours, EmailSender emailSender, EmailTemplateService emailTemplates)
     {
-        return string.IsNullOrWhiteSpace(context.EscalationNumber)
-            ? new { success = false, error = "No escalation number is configured for this company." }
-            : new { success = true, message = "Transferring call to a human representative." };
+        if (string.IsNullOrWhiteSpace(context.EscalationNumber))
+            return new { success = false, error = "No escalation number is configured for this company." };
+
+        await SendOwnerNotificationAsync(context, "Gesprek doorgestuurd", "owner_transfer",
+            openingHours, emailSender, isUrgent: false,
+            () => emailTemplates.OwnerTransfer(context.CompanyName ?? string.Empty, context.CallerNumber, null));
+
+        await SendOwnerNotificationAsync(context, "Spoedmelding ontvangen", "owner_urgent",
+            openingHours, emailSender, isUrgent: true,
+            () => emailTemplates.OwnerUrgent(context.CompanyName ?? string.Empty, context.CallerNumber));
+
+        return new { success = true, message = "Transferring call to a human representative." };
     }
 
     private static async Task<object> GetOpeningHoursAsync(
@@ -215,7 +243,8 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
 
     private static async Task<object> ScheduleCallbackAsync(
         CallDispatchContext context, JsonNode? args,
-        ICallbackService callbacks, IWhatsAppService whatsApp)
+        ICallbackService callbacks, IWhatsAppService whatsApp,
+        IOpeningHoursService openingHours, EmailSender emailSender, EmailTemplateService emailTemplates)
     {
         var callerName     = args!["caller_name"]!.GetValue<string>();
         var reason         = args["reason"]!.GetValue<string>();
@@ -228,12 +257,19 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
             callerName, reason, scheduledFrom, scheduledUntil);
 
         var features = context.Features ?? CompanyFeatures.Default;
-        if (features.WhatsAppConfirmation && !string.IsNullOrWhiteSpace(context.CallerNumber))
+        var sendCallbackConfirm = context.AutoMessageFlags?.GetValueOrDefault("callback_confirmation", true) ?? true;
+        if (features.WhatsAppConfirmation && sendCallbackConfirm && !string.IsNullOrWhiteSpace(context.CallerNumber))
         {
             await whatsApp.SendCallbackConfirmationAsync(
                 context.CompanyId, context.CallerNumber,
                 callerName);
         }
+
+        await SendOwnerNotificationAsync(context, "Terugbelverzoek aangemaakt", "owner_callback_created",
+            openingHours, emailSender, isUrgent: false,
+            () => emailTemplates.OwnerCallbackCreated(
+                context.CompanyName ?? string.Empty, callerName, reason,
+                scheduledFrom, scheduledUntil, context.CallerNumber));
 
         return new { success = true, callback_request_id = id, message = "Callback request scheduled." };
     }
@@ -401,6 +437,35 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
             });
         }
         return string.Join(" ", parts.Where(p => p is not null));
+    }
+
+    // ── Owner notification helper ────────────────────────────────────────────
+
+    private static async Task SendOwnerNotificationAsync(
+        CallDispatchContext ctx,
+        string topic,
+        string emailType,
+        IOpeningHoursService openingHours,
+        EmailSender emailSender,
+        bool isUrgent,
+        Func<(string Subject, string Html)> buildEmail)
+    {
+        if (string.IsNullOrEmpty(ctx.OwnerEmail)) return;
+        if (ctx.NotificationTopics is not { Length: > 0 } topics) return;
+        if (!topics.Contains(topic, StringComparer.OrdinalIgnoreCase)) return;
+
+        bool isOpen;
+        try { isOpen = await openingHours.IsCompanyOpenAsync(ctx.CompanyId); }
+        catch { isOpen = true; }
+
+        if (!isOpen && !ctx.NotifyOutsideHours && !(isUrgent && ctx.UrgentWhatsappAfterHours)) return;
+
+        try
+        {
+            var (subject, html) = buildEmail();
+            await emailSender.SendNowAsync(ctx.CompanyId, ctx.OwnerEmail, ctx.CompanyName ?? "Bedrijf", emailType, subject, html);
+        }
+        catch { /* notification failure must never break the call */ }
     }
 
     // ── Shared helpers ───────────────────────────────────────────────────────

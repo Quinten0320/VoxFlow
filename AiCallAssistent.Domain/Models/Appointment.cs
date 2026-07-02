@@ -40,6 +40,9 @@ public class Appointment
     [Column("followup_sent_at")]
     public DateTimeOffset? FollowupSentAt { get; set; }
 
+    [Column("day_of_reminder_sent_at")]
+    public DateTimeOffset? DayOfReminderSentAt { get; set; }
+
     [ForeignKey(nameof(EmployeeId))]
     public Employee? Employee { get; set; }
 }

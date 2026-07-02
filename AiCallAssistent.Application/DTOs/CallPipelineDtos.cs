@@ -42,7 +42,12 @@ public record CallDispatchContext(
     IReadOnlyDictionary<string, string>? DepartmentPhones = null,
     string? Branch = null,
     CompanyFeatures? Features = null,
-    string? CompanyName = null);
+    string? CompanyName = null,
+    IReadOnlyDictionary<string, bool>? AutoMessageFlags = null,
+    string? OwnerEmail = null,
+    string[]? NotificationTopics = null,
+    bool NotifyOutsideHours = false,
+    bool UrgentWhatsappAfterHours = true);
 
 /// <summary>
 /// Company-specific settings loaded once per call from assistant_settings.

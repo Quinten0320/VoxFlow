@@ -194,6 +194,24 @@ public class CallSetupService(
             catch (Exception ex) { logger.LogWarning(ex, "After-hours check failed for company {CompanyId}", companyId); }
         }
 
+        // Override callMode based on per-period routing settings.
+        // routingDuringHours/routingAfterHours take precedence over the legacy callMode field.
+        // "niemand" = backup (ring human first), "altijd" = first_line (bot always answers).
+        var routingDuring = assistantSettings?.RoutingDuringHours;
+        var routingAfter  = assistantSettings?.RoutingAfterHours;
+        if (isAfterHours && routingAfter is { Length: > 0 })
+        {
+            // Avoid double-forwarding: if afterHoursMode is TryHuman, the bot auto-forwards
+            // after answering — don't also do a pre-answer backup ring.
+            callMode = routingAfter == "niemand" && afterHoursMode != Application.Constants.AfterHoursMode.TryHuman
+                ? CallMode.Backup
+                : CallMode.FirstLine;
+        }
+        else if (!isAfterHours && routingDuring is { Length: > 0 })
+        {
+            callMode = routingDuring == "niemand" ? CallMode.Backup : CallMode.FirstLine;
+        }
+
         // Always use AssistantSettings greeting — no profile-level override since there is no UI to set one.
         var effectiveSettings = assistantSettings;
         string? greetingOverride  = null;
@@ -254,6 +272,56 @@ public class CallSetupService(
             }
         }
 
+        IReadOnlyDictionary<string, bool>? autoMessageFlags = null;
+        if (assistantSettings?.AutoMessageConfig is { Length: > 0 } amJson)
+        {
+            try
+            {
+                var parsed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(amJson);
+                if (parsed is { Count: > 0 }) autoMessageFlags = parsed;
+            }
+            catch { /* malformed JSON — ignore */ }
+        }
+
+        // Load owner email for sending notifications to the company owner.
+        string? ownerEmail = null;
+        try
+        {
+            ownerEmail = await db.Employees
+                .AsNoTracking()
+                .Where(e => e.CompanyId == companyId && e.IsOwner && e.Email != null)
+                .Select(e => e.Email)
+                .FirstOrDefaultAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not load owner email for company {CompanyId}", companyId);
+        }
+
+        // Parse notificationConfig: which topics trigger owner emails, and hour-gating flags.
+        string[]? notificationTopics = null;
+        bool notifyOutsideHours = false;
+        bool urgentWhatsappAfterHours = true;
+        if (assistantSettings?.NotificationConfig is { Length: > 0 } ncJson)
+        {
+            try
+            {
+                var nc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(ncJson);
+                if (nc.TryGetProperty("topics", out var topicsEl) && topicsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    notificationTopics = topicsEl.EnumerateArray().Select(t => t.GetString() ?? "").Where(t => t.Length > 0).ToArray();
+                // Support both key names (InstellingenPage uses camelCase, onboarding uses different names)
+                if (nc.TryGetProperty("notifyOutsideHours", out var noh) && noh.ValueKind == System.Text.Json.JsonValueKind.True)
+                    notifyOutsideHours = true;
+                else if (nc.TryGetProperty("outsideHours", out var oh) && oh.ValueKind == System.Text.Json.JsonValueKind.True)
+                    notifyOutsideHours = true;
+                if (nc.TryGetProperty("urgentWhatsappAfterHours", out var uwah))
+                    urgentWhatsappAfterHours = uwah.GetBoolean();
+                else if (nc.TryGetProperty("urgentAfterHours", out var uah))
+                    urgentWhatsappAfterHours = uah.GetBoolean();
+            }
+            catch { /* malformed JSON — ignore */ }
+        }
+
         return new CallSetupData(
             companyId, escalationNumber, features, language,
             afterHoursMode, isAfterHours, welcomeText, branch,
@@ -272,7 +340,12 @@ public class CallSetupService(
             SubscriptionLocked:      isSubscriptionLocked,
             VoiceKey:                voiceKey,
             CompanyName:             companyName,
-            ForwardWhenConditions:   forwardWhenConditions);
+            ForwardWhenConditions:   forwardWhenConditions,
+            AutoMessageFlags:        autoMessageFlags,
+            OwnerEmail:              ownerEmail,
+            NotificationTopics:      notificationTopics,
+            NotifyOutsideHours:      notifyOutsideHours,
+            UrgentWhatsappAfterHours: urgentWhatsappAfterHours);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)

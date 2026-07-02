@@ -33,7 +33,12 @@ public record CallSetupData(
     bool SubscriptionLocked = false,
     string? VoiceKey = null,
     string? CompanyName = null,
-    string[]? ForwardWhenConditions = null);
+    string[]? ForwardWhenConditions = null,
+    IReadOnlyDictionary<string, bool>? AutoMessageFlags = null,
+    string? OwnerEmail = null,
+    string[]? NotificationTopics = null,
+    bool NotifyOutsideHours = false,
+    bool UrgentWhatsappAfterHours = true);
 
 /// <summary>All data required to process a recording turn — loaded once at the top of Recording().</summary>
 public record CallRecordingContext(

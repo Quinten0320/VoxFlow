@@ -90,7 +90,12 @@ public sealed class CallStreamHandler
             setup.DepartmentPhones,
             setup.Branch,
             setup.Features,
-            setup.CompanyName);
+            setup.CompanyName,
+            setup.AutoMessageFlags,
+            setup.OwnerEmail,
+            setup.NotificationTopics,
+            setup.NotifyOutsideHours,
+            setup.UrgentWhatsappAfterHours);
 
         _callConfig = new CompanyCallConfig(
             SystemPrompt:         setup.SystemPrompt,

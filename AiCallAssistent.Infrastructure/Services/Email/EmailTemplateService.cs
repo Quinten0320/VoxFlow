@@ -488,6 +488,67 @@ public class EmailTemplateService
             {Cta("Integratie activeren", DashboardUrl + "/integraties")}
             """));
 
+    // ── Owner event notifications ─────────────────────────────────────────────
+
+    public (string Subject, string Html) OwnerAppointmentCreated(
+        string companyName, string? customerName, string type, DateTimeOffset startTime, string? callerPhone) =>
+        ($"Nieuwe afspraak: {customerName ?? "klant"} – {type}", Layout(
+            $"Afspraak ingepland op {startTime:dd-MM-yyyy HH:mm}.",
+            $"""
+            <h2>Nieuwe afspraak ingepland</h2>
+            <p>Via uw VoxFlow-assistent is zojuist een afspraak ingepland:</p>
+            <div class="stats"><table>
+              <tr><td>Klant</td><td>{customerName ?? "Onbekend"}</td></tr>
+              <tr><td>Type</td><td>{type}</td></tr>
+              <tr><td>Datum &amp; tijd</td><td>{startTime:dd-MM-yyyy HH:mm}</td></tr>
+              {(callerPhone is { Length: > 0 } ? $"<tr><td>Telefoonnummer</td><td>{callerPhone}</td></tr>" : "")}
+            </table></div>
+            {Cta("Bekijk afspraken", DashboardUrl + "/afspraken")}
+            """));
+
+    public (string Subject, string Html) OwnerCallbackCreated(
+        string companyName, string callerName, string reason,
+        DateTimeOffset scheduledFrom, DateTimeOffset scheduledUntil, string? callerPhone) =>
+        ($"Terugbelverzoek: {callerName}", Layout(
+            $"{callerName} wil teruggebeld worden.",
+            $"""
+            <h2>Terugbelverzoek ontvangen</h2>
+            <p>Via uw VoxFlow-assistent is een terugbelverzoek aangemaakt:</p>
+            <div class="stats"><table>
+              <tr><td>Naam</td><td>{callerName}</td></tr>
+              <tr><td>Reden</td><td>{reason}</td></tr>
+              <tr><td>Bel terug tussen</td><td>{scheduledFrom:HH:mm} – {scheduledUntil:HH:mm} op {scheduledFrom:dd-MM-yyyy}</td></tr>
+              {(callerPhone is { Length: > 0 } ? $"<tr><td>Telefoonnummer</td><td>{callerPhone}</td></tr>" : "")}
+            </table></div>
+            {Cta("Bekijk terugbelverzoeken", DashboardUrl + "/inbox")}
+            """));
+
+    public (string Subject, string Html) OwnerTransfer(
+        string companyName, string? callerPhone, string? departmentName) =>
+        ("Gesprek doorgestuurd naar medewerker", Layout(
+            "Een beller is doorgestuurd door uw assistent.",
+            $"""
+            <h2>Gesprek doorgestuurd</h2>
+            <p>Uw VoxFlow-assistent heeft een gesprek doorgestuurd{(departmentName is { Length: > 0 } ? $" naar de afdeling <strong>{departmentName}</strong>" : " naar een medewerker")}.</p>
+            <div class="stats"><table>
+              {(callerPhone is { Length: > 0 } ? $"<tr><td>Beller</td><td>{callerPhone}</td></tr>" : "")}
+              {(departmentName is { Length: > 0 } ? $"<tr><td>Afdeling</td><td>{departmentName}</td></tr>" : "")}
+            </table></div>
+            {Cta("Bekijk gesprekken", DashboardUrl + "/gesprekken")}
+            """));
+
+    public (string Subject, string Html) OwnerUrgent(string companyName, string? callerPhone) =>
+        ("Spoedmelding ontvangen van beller", Layout(
+            "Urgente oproep via uw VoxFlow-assistent.",
+            $"""
+            <h2>Spoedmelding ontvangen</h2>
+            <p>Uw VoxFlow-assistent heeft een urgente oproep ontvangen en de beller doorgestuurd naar een medewerker.</p>
+            <div class="stats"><table>
+              {(callerPhone is { Length: > 0 } ? $"<tr><td>Beller</td><td>{callerPhone}</td></tr>" : "")}
+            </table></div>
+            {Cta("Bekijk gesprekken", DashboardUrl + "/gesprekken")}
+            """));
+
     // ── #60 · Integratie wachtlijst aanvraag (intern naar admin) ─────────────
 
     public (string Subject, string Html) IntegrationNotifyAdmin(string companyName, short companyId, string integratieNaam) =>

@@ -171,8 +171,8 @@ public class TwilioController : ControllerBase
             _logger.LogError(ex, "Failed to persist CallSession for {CallSid}", callSid);
         }
 
-        // Feature 1 — backup mode: try the escalation number first.
-        if (setup.CallMode == CallMode.Backup && !setup.IsAfterHours && setup.EscalationNumber is { Length: > 0 } esc)
+        // Feature 1 — backup mode: try the escalation number first (works both during and after hours).
+        if (setup.CallMode == CallMode.Backup && setup.EscalationNumber is { Length: > 0 } esc)
         {
             var backupActionUrl = $"{_twilio.BaseUrl}/api/twilio/backup-no-answer"
                 + $"?calledNumber={Uri.EscapeDataString(calledNumber)}"
@@ -243,6 +243,27 @@ public class TwilioController : ControllerBase
     {
         var callSid    = Request.Form["CallSid"].ToString();
         var callStatus = Request.Form["CallStatus"].ToString();
+
+        // For missed/failed calls: mark the session and exit — no transcript to build.
+        if (callStatus is "no-answer" or "busy" or "failed")
+        {
+            try
+            {
+                var missed = await _db.CallSessions.FindAsync(callSid);
+                if (missed != null && missed.CallType == null)
+                {
+                    missed.CallType = "Missed";
+                    missed.Status   = callStatus;
+                    missed.EndedAt  = DateTimeOffset.UtcNow;
+                    await _db.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not mark missed call {CallSid}", callSid);
+            }
+            return Ok();
+        }
 
         if (callStatus != "completed") return Ok();
 
@@ -695,7 +716,13 @@ public class TwilioController : ControllerBase
                 setup.EscalationNumber,
                 setup.DepartmentPhones,
                 setup.Branch,
-                setup.Features);
+                setup.Features,
+                setup.CompanyName,
+                setup.AutoMessageFlags,
+                setup.OwnerEmail,
+                setup.NotificationTopics,
+                setup.NotifyOutsideHours,
+                setup.UrgentWhatsappAfterHours);
 
             var config = new CompanyCallConfig(
                 setup.SystemPrompt,
