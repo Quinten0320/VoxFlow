@@ -41,11 +41,10 @@ public sealed class DeepgramStreamingService : IDeepgramStreamingService
         _ws = new ClientWebSocket();
         _ws.Options.SetRequestHeader("Authorization", $"Token {_settings.ApiKey}");
 
-        // flux-general-multi auto-detects language per utterance (Dutch + English + more)
+        // flux-general-multi handles multiple languages natively — no language param needed
         var url = $"{_settings.BaseUrl}/v2/listen"
             + $"?encoding=mulaw&sample_rate=8000"
             + $"&model=flux-general-multi"
-            + $"&detect_language=true"
             + $"&eot_timeout_ms=500"
             + $"&eot_threshold=0.5";
 
