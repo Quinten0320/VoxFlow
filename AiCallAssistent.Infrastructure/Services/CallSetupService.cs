@@ -161,8 +161,13 @@ public class CallSetupService(
                     var nonAfterHours = new List<string>();
                     foreach (var entry in entries)
                     {
-                        var when = entry.TryGetProperty("when", out var w) ? w.GetString() : null;
-                        var number = entry.TryGetProperty("number", out var n) ? n.GetString() : null;
+                        // Support both old plain-string format ["0612345678"] and new object format [{number,when,department}]
+                        string? when   = entry.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? null
+                            : entry.TryGetProperty("when", out var w) ? w.GetString() : null;
+                        string? number = entry.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? entry.GetString()
+                            : entry.TryGetProperty("number", out var n) ? n.GetString() : null;
                         if (when?.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase) == true)
                         {
                             if (string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
@@ -178,6 +183,12 @@ public class CallSetupService(
                             if (string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
                                 escalationNumber = number;
                             nonAfterHours.Add(when);
+                        }
+                        else if (number is { Length: > 0 })
+                        {
+                            // Old plain-string format: no "when" condition — treat as general escalation number
+                            if (string.IsNullOrEmpty(escalationNumber))
+                                escalationNumber = number;
                         }
                     }
                     if (nonAfterHours.Count > 0)

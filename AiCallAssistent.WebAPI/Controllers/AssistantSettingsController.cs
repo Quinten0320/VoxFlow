@@ -111,12 +111,26 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.BehaviorInstructions = request.BehaviorInstructions;
         settings.ForwardNumbers       = request.ForwardNumbers;
         settings.Avatar               = request.Avatar;
+        var oldDuring = settings.RoutingDuringHours;
+        var oldAfter  = settings.RoutingAfterHours;
+
         settings.RoutingDuringHours   = request.RoutingDuringHours;
         settings.RoutingAfterHours    = request.RoutingAfterHours;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
 
         await Db.SaveChangesAsync();
         await LogAuditAsync(companyId, "Assistent instellingen bijgewerkt");
+
+        if (oldDuring != request.RoutingDuringHours)
+        {
+            var label = request.RoutingDuringHours == "niemand" ? "Als niemand opneemt" : "Altijd bereikbaar";
+            await LogAuditAsync(companyId, $"Doorschakelregel tijdens kantooruren → {label}");
+        }
+        if (oldAfter != request.RoutingAfterHours)
+        {
+            var label = request.RoutingAfterHours == "niemand" ? "Als niemand opneemt" : "Altijd bereikbaar";
+            await LogAuditAsync(companyId, $"Doorschakelregel buiten kantooruren → {label}");
+        }
 
         return NoContent();
     }
