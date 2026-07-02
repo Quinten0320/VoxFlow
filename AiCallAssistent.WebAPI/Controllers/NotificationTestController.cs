@@ -30,41 +30,33 @@ public class NotificationTestController(
             .FirstOrDefaultAsync() ?? $"Bedrijf {companyId}";
 
         var now = DateTimeOffset.UtcNow;
-        var nl  = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(now.AddDays(1));
+        const string? callerName = "Testbeller";
 
-        string msg;
-        string messageType;
         switch (type.ToLowerInvariant())
         {
             case "reminder":
-                msg =
-                    $"⏰ Herinnering: morgen heeft u een afspraak bij {companyName}!\n\n" +
-                    $"📅 {nl:dddd d MMMM} om {nl:HH:mm}\n" +
-                    $"💇 Testafspraak\n" +
-                    $"👤 Test Medewerker";
-                messageType = "reminder";
+                await whatsApp.SendAppointmentReminderAsync(companyId, to, companyName, callerName, now.AddDays(1), "Testafspraak");
+                break;
+
+            case "day_reminder":
+                await whatsApp.SendAppointmentDayReminderAsync(companyId, to, companyName, callerName, now.AddHours(2), "Testafspraak");
+                break;
+
+            case "confirmation":
+                await whatsApp.SendAppointmentConfirmationAsync(companyId, to, companyName, callerName, now.AddDays(3), "Testafspraak");
                 break;
 
             case "followup":
-                msg = $"😊 Bedankt voor uw bezoek bij {companyName}!\n\nWe hopen dat uw Testafspraak naar wens was. Tot de volgende keer!";
-                messageType = "followup";
+                await whatsApp.SendAppointmentFollowupAsync(companyId, to, companyName, callerName);
                 break;
 
             case "callback":
-                var fromNl  = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(now.AddHours(2));
-                var untilNl = AiCallAssistent.Application.Helpers.NlTimeZone.ConvertFromUtc(now.AddHours(4));
-                msg =
-                    $"📞 Terugbelverzoek ontvangen, Testbeller!\n\n" +
-                    $"Wij bellen u terug op {fromNl:dddd d MMMM} tussen {fromNl:HH:mm} en {untilNl:HH:mm}.\n\n" +
-                    $"Staat u ergens anders voor open? Bel ons dan even.";
-                messageType = "callback";
+                await whatsApp.SendCallbackConfirmationAsync(companyId, to, callerName);
                 break;
 
             default:
-                return BadRequest(new { error = "type must be 'reminder', 'followup', or 'callback'" });
+                return BadRequest(new { error = "type must be 'confirmation', 'reminder', 'day_reminder', 'followup', or 'callback'" });
         }
-
-        await whatsApp.SendForCompanyAsync(companyId, to, msg, messageType);
 
         return Ok(new { sent = true, to, type, companyId, companyName });
     }

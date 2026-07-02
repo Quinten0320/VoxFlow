@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AiCallAssistent.Application.Configuration;
 using AiCallAssistent.Application.Helpers;
 using AiCallAssistent.Application.Services;
@@ -15,11 +16,20 @@ public class WhatsAppService(
     ILogger<WhatsAppService> logger,
     AppDbContext db) : IWhatsAppService
 {
-    // ── Low-level send (Twilio API) ──────────────────────────────────────────
+    // Twilio Content Template SIDs (Meta-approved)
+    private const string SidBevestiging     = "HX2e527da156d40bafa604eba5a9d9e9b6"; // voxflow_bevestiging
+    private const string SidHerinnering24u  = "HX3a0015dfaf53f680afd38c6352a4104e"; // voxflow_herinnering_24u
+    private const string SidHerrinneringDag = "HXef0336975c2d105ec896ee3a916cfe4c"; // voxflow_herinnering_dag
+    private const string SidTerugbel        = "HXb5277efb45310aa7c36e021dd48d4745"; // voxflow_terugbel
+    private const string SidFollowup        = "HX3e58e208614b963df6ec011d257a85f2"; // voxflow_followup
 
-    private async Task SendRawAsync(string toNumber, string message, string fromNumber)
+    // ── Low-level send (Twilio Content Templates API) ────────────────────────
+
+    private async Task SendTemplateAsync(string toNumber, string fromNumber,
+        string contentSid, Dictionary<string, string> variables)
     {
         var settings = twilioSettings.Value;
+        var contentVariables = JsonSerializer.Serialize(variables);
 
         try
         {
@@ -29,9 +39,10 @@ public class WhatsAppService(
             var response = await client.PostAsync(url, new FormUrlEncodedContent(
                 new Dictionary<string, string>
                 {
-                    ["From"] = $"whatsapp:{fromNumber}",
-                    ["To"]   = $"whatsapp:{toNumber}",
-                    ["Body"] = message
+                    ["From"]             = $"whatsapp:{fromNumber}",
+                    ["To"]               = $"whatsapp:{toNumber}",
+                    ["ContentSid"]       = contentSid,
+                    ["ContentVariables"] = contentVariables,
                 }));
 
             if (!response.IsSuccessStatusCode)
@@ -49,7 +60,8 @@ public class WhatsAppService(
 
     // ── Company-aware send (quota + active check + logging) ──────────────────
 
-    public async Task SendForCompanyAsync(short companyId, string toNumber, string message, string messageType)
+    private async Task SendForCompanyAsync(short companyId, string toNumber,
+        string contentSid, Dictionary<string, string> variables, string messageType)
     {
         var settings = await db.AssistantSettings
             .AsNoTracking()
@@ -85,7 +97,7 @@ public class WhatsAppService(
             }
         }
 
-        await SendRawAsync(toNumber, message, settings.WhatsAppPhoneNumber);
+        await SendTemplateAsync(toNumber, settings.WhatsAppPhoneNumber, contentSid, variables);
 
         db.WhatsAppMessageLogs.Add(new WhatsAppMessageLog
         {
@@ -97,67 +109,66 @@ public class WhatsAppService(
         await db.SaveChangesAsync();
     }
 
-    // ── Typed message senders — single place for all message content ──────────
+    // ── Typed message senders ─────────────────────────────────────────────────
 
     public Task SendAppointmentConfirmationAsync(short companyId, string toNumber,
         string companyName, string? callerName, DateTimeOffset startTime, string serviceType)
     {
         var nl = NlTimeZone.ConvertFromUtc(startTime);
-        var greeting = callerName is { Length: > 0 } ? $"Hoi {callerName}!" : "Hoi!";
-        var msg =
-            $"{greeting}\n\n" +
-            $"Je afspraak bij {companyName} is bevestigd op {nl:dddd d MMMM} om {nl:HH:mm}.\n\n" +
-            $"Wil je de afspraak wijzigen of annuleren? Bel ons gerust of stuur een bericht terug.\n\n" +
-            $"Tot dan!";
-        return SendForCompanyAsync(companyId, toNumber, msg, "confirmation");
+        return SendForCompanyAsync(companyId, toNumber, SidBevestiging,
+            new Dictionary<string, string>
+            {
+                ["1"] = callerName ?? "daar",
+                ["2"] = companyName,
+                ["3"] = nl.ToString("dddd d MMMM", new System.Globalization.CultureInfo("nl-NL")),
+                ["4"] = nl.ToString("HH:mm"),
+            }, "confirmation");
     }
 
     public Task SendAppointmentReminderAsync(short companyId, string toNumber,
         string companyName, string? callerName, DateTimeOffset startTime, string serviceType)
     {
         var nl = NlTimeZone.ConvertFromUtc(startTime);
-        var greeting = callerName is { Length: > 0 } ? $"Hoi {callerName}," : "Hoi,";
-        var msg =
-            $"{greeting}\n\n" +
-            $"Een korte herinnering: morgen om {nl:HH:mm} heb je een afspraak bij {companyName}.\n\n" +
-            $"Kun je niet? Laat het ons even weten, dan plannen we een nieuw moment in.\n\n" +
-            $"Tot dan!";
-        return SendForCompanyAsync(companyId, toNumber, msg, "reminder");
+        return SendForCompanyAsync(companyId, toNumber, SidHerinnering24u,
+            new Dictionary<string, string>
+            {
+                ["1"] = callerName ?? "daar",
+                ["2"] = nl.ToString("HH:mm"),
+                ["3"] = companyName,
+            }, "reminder");
     }
 
     public Task SendAppointmentDayReminderAsync(short companyId, string toNumber,
         string companyName, string? callerName, DateTimeOffset startTime, string serviceType)
     {
         var nl = NlTimeZone.ConvertFromUtc(startTime);
-        var greeting = callerName is { Length: > 0 } ? $"Hoi {callerName}," : "Hoi,";
-        var msg =
-            $"{greeting}\n\n" +
-            $"Vandaag om {nl:HH:mm} heb je een afspraak bij {companyName}. We zien je graag!\n\n" +
-            $"Kom je toch niet? Laat het ons even weten.\n\n" +
-            $"Tot dan!";
-        return SendForCompanyAsync(companyId, toNumber, msg, "day_reminder");
+        return SendForCompanyAsync(companyId, toNumber, SidHerrinneringDag,
+            new Dictionary<string, string>
+            {
+                ["1"] = callerName ?? "daar",
+                ["2"] = nl.ToString("HH:mm"),
+                ["3"] = companyName,
+            }, "day_reminder");
     }
 
     public Task SendCallbackConfirmationAsync(short companyId, string toNumber,
         string? callerName)
     {
-        var greeting = callerName is { Length: > 0 } ? $"Hoi {callerName}," : "Hoi,";
-        var msg =
-            $"{greeting}\n\n" +
-            $"Bedankt voor het bellen. We hebben je terugbelverzoek ontvangen en nemen zo snel mogelijk contact met je op.\n\n" +
-            $"Heb je ondertussen een vraag? Stuur gerust een bericht.\n\n" +
-            $"Tot dan!";
-        return SendForCompanyAsync(companyId, toNumber, msg, "callback");
+        return SendForCompanyAsync(companyId, toNumber, SidTerugbel,
+            new Dictionary<string, string>
+            {
+                ["1"] = callerName ?? "daar",
+            }, "callback");
     }
 
     public Task SendAppointmentFollowupAsync(short companyId, string toNumber,
         string companyName, string? callerName)
     {
-        var greeting = callerName is { Length: > 0 } ? $"Hoi {callerName}," : "Hoi,";
-        var msg =
-            $"{greeting}\n\n" +
-            $"Bedankt voor je telefoontje naar {companyName} zojuist. Kunnen we nog ergens mee helpen?\n\n" +
-            $"Voor vragen of een nieuwe afspraak staan we voor je klaar.";
-        return SendForCompanyAsync(companyId, toNumber, msg, "followup");
+        return SendForCompanyAsync(companyId, toNumber, SidFollowup,
+            new Dictionary<string, string>
+            {
+                ["1"] = callerName ?? "daar",
+                ["2"] = companyName,
+            }, "followup");
     }
 }
