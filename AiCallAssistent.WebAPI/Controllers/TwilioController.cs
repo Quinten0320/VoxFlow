@@ -183,7 +183,7 @@ public class TwilioController : ControllerBase
                 <?xml version="1.0" encoding="UTF-8"?>
                 <Response>
                     <Dial timeout="20" action="{XmlEscape(backupActionUrl)}" callerId="{XmlEscape(callerNumber)}">
-                        <Number>{XmlEscape(esc)}</Number>
+                        <Number>{XmlEscape(NormalizeToE164(esc))}</Number>
                     </Dial>
                 </Response>
                 """);
