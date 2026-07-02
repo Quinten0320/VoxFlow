@@ -184,6 +184,7 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.AutoMessageConfig = JsonSerializer.Serialize(config);
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await Db.SaveChangesAsync();
+        await LogAuditAsync(companyId, $"Automatische acties bijgewerkt: {JsonSerializer.Serialize(config)}");
         return NoContent();
     }
 }
