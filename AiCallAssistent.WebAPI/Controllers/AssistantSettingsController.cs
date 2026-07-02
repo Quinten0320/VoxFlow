@@ -170,6 +170,22 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         await Db.SaveChangesAsync();
         return NoContent();
     }
+
+    /// <summary>Saves which automatic WhatsApp actions are enabled.</summary>
+    [HttpPatch("auto-message-config")]
+    public async Task<IActionResult> PatchAutoMessageConfig([FromBody] Dictionary<string, bool> config)
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var settings = await Db.AssistantSettings.FindAsync(companyId);
+        if (settings == null) return NotFound();
+
+        settings.AutoMessageConfig = JsonSerializer.Serialize(config);
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+        return NoContent();
+    }
 }
 
 public record UpdateAppointmentLimitsRequest(int? MaxPerDay, int? BufferMinutes = null);

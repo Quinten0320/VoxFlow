@@ -473,7 +473,7 @@ public class TwilioController : ControllerBase
     [HttpPost("dial-status")]
     [Consumes("application/x-www-form-urlencoded")]
     [ValidateTwilioRequest]
-    public IActionResult DialStatus([FromQuery] string? fallback)
+    public async Task<IActionResult> DialStatus([FromQuery] string? fallback)
     {
         var dialStatus   = Request.Form["DialCallStatus"].ToString();
         var calledNumber = Request.Form["Called"].ToString();
@@ -495,6 +495,25 @@ public class TwilioController : ControllerBase
         {
             _logger.LogInformation("Transfer unanswered for {CalledNumber} — resuming bot for callback", calledNumber);
             return TwimlResult(BuildStreamTwiml(calledNumber, callerNumber, transferNoAnswer: true));
+        }
+
+        // Transfer was answered — mark the call as transferred
+        var callSid = Request.Form["CallSid"].ToString();
+        if (!string.IsNullOrEmpty(callSid))
+        {
+            try
+            {
+                var transferred = await _db.CallSessions.FindAsync(callSid);
+                if (transferred != null && transferred.CallType is null or "Info")
+                {
+                    transferred.CallType = "Transfer";
+                    await _db.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not mark transfer for {CallSid}", callSid);
+            }
         }
 
         return TwimlResult("""<?xml version="1.0" encoding="UTF-8"?><Response></Response>""");
