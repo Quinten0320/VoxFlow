@@ -15,15 +15,25 @@ public class PhoneVerifyController(
 {
     private readonly TwilioSettings _twilio = twilioOptions.Value;
 
+    private static string? NormalizePhone(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var n = raw.Trim().Replace(" ", "").Replace("-", "");
+        if (n.StartsWith('+'))  return n;
+        if (n.StartsWith("00")) return '+' + n[2..];
+        if (n.StartsWith("0"))  return "+31" + n[1..];
+        return n;
+    }
+
     [HttpPost("send")]
     public async Task<IActionResult> Send([FromBody] PhoneVerifySendRequest request)
     {
         if (string.IsNullOrWhiteSpace(_twilio.VerifyServiceSid))
             return StatusCode(503, new { error = "SMS-verificatie is niet geconfigureerd." });
 
-        var phone = request.PhoneNumber?.Trim();
+        var phone = NormalizePhone(request.PhoneNumber?.Trim());
         if (string.IsNullOrWhiteSpace(phone) || !Regex.IsMatch(phone, @"^\+[1-9]\d{6,14}$"))
-            return BadRequest(new { error = "Vul een geldig telefoonnummer in (E.164 formaat, bijv. +31612345678)." });
+            return BadRequest(new { error = "Vul een geldig telefoonnummer in (bijv. 0612345678 of +31612345678)." });
 
         try
         {
@@ -59,7 +69,7 @@ public class PhoneVerifyController(
         if (string.IsNullOrWhiteSpace(_twilio.VerifyServiceSid))
             return StatusCode(503, new { error = "SMS-verificatie is niet geconfigureerd." });
 
-        var phone = request.PhoneNumber?.Trim();
+        var phone = NormalizePhone(request.PhoneNumber?.Trim());
         var code  = request.Code?.Trim();
 
         if (string.IsNullOrWhiteSpace(phone) || string.IsNullOrWhiteSpace(code))

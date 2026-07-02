@@ -96,11 +96,11 @@ public class DashboardReportingController(AppDbContext db) : DashboardController
             firstCallResolutionPct = (int)Math.Round((double)(total - repeatCallers) / total * 100);
         }
 
-        // Callback open/handled
+        // Callback open/handled — DB statuses: "Pending" (new), "handled" (done), "Cancelled", "Completed"
         var callbackOpen = await Db.CallbackRequests
-            .CountAsync(r => r.CompanyId == companyId && r.Status == "open");
+            .CountAsync(r => r.CompanyId == companyId && r.Status == "Pending");
         var callbackHandled = await Db.CallbackRequests
-            .CountAsync(r => r.CompanyId == companyId && r.Status == "handled");
+            .CountAsync(r => r.CompanyId == companyId && (r.Status == "handled" || r.Status == "Completed"));
 
         return Ok(new ReportingDto(
             callsPerDay,

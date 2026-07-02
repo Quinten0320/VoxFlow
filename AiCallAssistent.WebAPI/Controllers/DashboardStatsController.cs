@@ -110,7 +110,7 @@ public class DashboardStatsController(AppDbContext db) : DashboardControllerBase
             .ToList();
 
         var openCallbacks = await Db.CallbackRequests
-            .CountAsync(r => r.CompanyId == companyId && r.Status == "open");
+            .CountAsync(r => r.CompanyId == companyId && r.Status == "Pending");
 
         var yesterdayStartUtc = todayStartUtc.AddDays(-1);
         var missedToday = await Db.CallSessions
