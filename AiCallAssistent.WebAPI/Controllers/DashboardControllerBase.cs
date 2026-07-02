@@ -163,23 +163,5 @@ public abstract class DashboardControllerBase(AppDbContext db) : ControllerBase
             });
         }
 
-        // Re-activation email
-        if (wasInactive)
-        {
-            var capturedCompanyId2 = employee.CompanyId;
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var (s, h) = templates.ReActivated(employee.Name);
-                    await emailSender.SendNowAsync(capturedCompanyId2, employee.Email!, employee.Name,
-                        "re_activated", s, h);
-                }
-                catch (Exception ex)
-                {
-                    capturedLogger?.LogError(ex, "Failed to send re_activated email for company {CompanyId}", capturedCompanyId2);
-                }
-            });
-        }
     }
 }

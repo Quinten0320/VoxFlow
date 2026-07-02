@@ -92,7 +92,7 @@ public class GeminiStreamingService : IGeminiStreamingService
 
                 try
                 {
-                    var result = await _dispatcher.DispatchAsync(context, funcName, funcArgs);
+                    var result = await _dispatcher.DispatchAsync(context, funcName, funcArgs, _conversations, conversationId);
                     contents.Add(GeminiRequestBuilder.FunctionResponseTurn(
                         funcName, new JsonObject { ["result"] = JsonSerializer.SerializeToNode(result) }));
 

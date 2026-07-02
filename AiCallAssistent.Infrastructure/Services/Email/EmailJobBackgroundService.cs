@@ -38,7 +38,6 @@ public class EmailJobBackgroundService(
         _lastDailyCheck = now;
 
         await RunInactivityChecksAsync(now, ct);
-        await RunWeeklyReportAsync(now, ct);
         await RunMonthlyReportAsync(now, ct);
     }
 
@@ -77,16 +76,11 @@ public class EmailJobBackgroundService(
 
                 var (subject, html) = job.EmailType switch
                 {
-                    "onboarding_start"    => templates.OnboardingStart(employee.Name),
                     "onboarding_reminder" => templates.OnboardingReminder(employee.Name),
                     "account_restricted"  => templates.AccountRestricted(employee.Name,
                                                 GetStr(payload, "bedrag")),
                     "winback_1"           => templates.WinBack1(employee.Name,
                                                 GetInt(payload, "aantalGesprekken")),
-                    "winback_7"           => templates.WinBack7(employee.Name,
-                                                GetInt(payload, "kortingsPercentage"),
-                                                GetStr(payload, "aanbiedingGeldigTot")),
-                    "winback_30"          => templates.WinBack30(employee.Name),
                     _ => throw new InvalidOperationException($"Unknown email type: {job.EmailType}"),
                 };
 
@@ -123,59 +117,15 @@ public class EmailJobBackgroundService(
 
             if (daysSince >= 30 && !await emailSender.AlreadySentAsync(companyId, "inactive_30", TimeSpan.FromDays(25)))
             {
-                var (subj, html) = templates.Inactive30Days(emp.Name);
-                await SendToEmployee(emp, companyId, "inactive_30", subj, html);
-            }
-            else if (daysSince >= 14 && !await emailSender.AlreadySentAsync(companyId, "inactive_14", TimeSpan.FromDays(10)))
-            {
                 var callCount = await db.CallSessions.CountAsync(c => c.CompanyId == companyId, ct);
-                var (subj, html) = templates.Inactive14Days(emp.Name, callCount);
-                await SendToEmployee(emp, companyId, "inactive_14", subj, html);
+                var (subj, html) = templates.Inactive30Days(emp.Name, callCount);
+                await SendToEmployee(emp, companyId, "inactive_30", subj, html);
             }
             else if (daysSince >= 7 && !await emailSender.AlreadySentAsync(companyId, "inactive_7", TimeSpan.FromDays(5)))
             {
                 var (subj, html) = templates.Inactive7Days(emp.Name);
                 await SendToEmployee(emp, companyId, "inactive_7", subj, html);
             }
-        }
-    }
-
-    // ── Weekly report (every Monday) ──────────────────────────────────────────
-
-    private async Task RunWeeklyReportAsync(DateTimeOffset now, CancellationToken ct)
-    {
-        if (now.DayOfWeek != DayOfWeek.Monday) return;
-
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var weekStart = now.AddDays(-7);
-        var weekNr    = ISOWeek.GetWeekOfYear(now.DateTime);
-
-        var companies = await db.CompanyPackages
-            .Where(p => p.SubscriptionStatus == "active" || p.SubscriptionStatus == "trialing")
-            .Select(p => p.CompanyId)
-            .ToListAsync(ct);
-
-        foreach (var companyId in companies)
-        {
-            if (await emailSender.AlreadySentAsync(companyId, "weekly_report", TimeSpan.FromDays(6))) continue;
-
-            var emp = await db.Employees.FirstOrDefaultAsync(
-                e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null, ct);
-            if (emp == null) continue;
-
-            var calls = await db.CallSessions
-                .Where(c => c.CompanyId == companyId && c.StartedAt >= weekStart)
-                .ToListAsync(ct);
-
-            var gesprekken = calls.Count;
-            var avgSeconds = calls.Where(c => c.EndedAt.HasValue)
-                                  .Select(c => (c.EndedAt!.Value - c.StartedAt).TotalSeconds)
-                                  .DefaultIfEmpty(0).Average();
-            var avgDur     = TimeSpan.FromSeconds(avgSeconds).ToString(@"m\:ss");
-
-            var (subj, html) = templates.WeeklyReport(emp.Name, gesprekken, 0, 0, avgDur, weekNr);
-            await SendToEmployee(emp, companyId, "weekly_report", subj, html);
         }
     }
 
@@ -211,7 +161,10 @@ public class EmailJobBackgroundService(
 
             var groei = prevCalls == 0 ? "n.v.t." : $"{(thisCalls - prevCalls) * 100 / prevCalls:+0;-0}%";
 
-            var (subj, html) = templates.MonthlyReport(emp.Name, maand, thisCalls, "–", groei, "–");
+            var doorverbonden = await db.CallSessions
+                .CountAsync(c => c.CompanyId == companyId && c.StartedAt >= monthStart && c.StartedAt < now
+                                 && c.CallType == "Transfer", ct);
+            var (subj, html) = templates.MonthlyReport(emp.Name, maand, thisCalls, "–", groei, doorverbonden);
             await SendToEmployee(emp, companyId, "monthly_report", subj, html);
         }
     }

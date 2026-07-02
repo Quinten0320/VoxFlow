@@ -17,9 +17,9 @@ public class EmailTemplateService
             .header { background:#6B46C1; padding:28px 40px; }
             .header h1 { margin:0; color:#fff; font-size:22px; letter-spacing:-0.3px; }
             .body { padding:36px 40px; color:#1a1a2e; line-height:1.65; font-size:15px; }
-            .body h2 { font-size:20px; margin:0 0 16px; color:#1a1a2e; }
             .body p { margin:0 0 14px; }
-            .cta { display:inline-block; margin:20px 0 8px; padding:13px 28px; background:#6B46C1; color:#fff !important; text-decoration:none; border-radius:8px; font-weight:600; font-size:15px; }
+            .cta { display:inline-block; margin:8px 8px 8px 0; padding:13px 28px; background:#6B46C1; color:#fff !important; text-decoration:none; border-radius:8px; font-weight:600; font-size:15px; }
+            .cta-sec { display:inline-block; margin:8px 8px 8px 0; padding:13px 28px; background:#f3f0ff; color:#6B46C1 !important; text-decoration:none; border-radius:8px; font-weight:600; font-size:15px; }
             .stats { background:#f8f7ff; border-radius:8px; padding:20px 24px; margin:16px 0; }
             .stats table { width:100%; border-collapse:collapse; }
             .stats td { padding:6px 0; font-size:14px; color:#444; }
@@ -47,127 +47,153 @@ public class EmailTemplateService
     private static string Cta(string label, string url) =>
         $"""<a href="{url}" class="cta">{label}</a>""";
 
+    private static string CtaSec(string label, string url) =>
+        $"""<a href="{url}" class="cta-sec">{label}</a>""";
+
     private static string DashboardUrl => "https://voxflow.nl/dashboard";
 
-    // ── #2 · Welkomst ─────────────────────────────────────────────────────────
+    // ── #1 · Welkomstmail ─────────────────────────────────────────────────────
 
     public (string Subject, string Html) Welcome(string naam) =>
-        ("Welkom bij VoxFlow 🎉", Layout(
-            $"Welkom, {naam}! Je account is klaar.",
+        ($"Welkom bij VoxFlow, {naam}!", Layout(
+            "Je account is aangemaakt. Start je onboarding.",
             $"""
-            <h2>Welkom, {naam}!</h2>
-            <p>Je account is aangemaakt en klaar om te starten. In een paar minuten stel je jouw AI-telefonist in en mis je nooit meer een gesprek.</p>
+            <p>Hoi {naam}, welkom!</p>
+            <p>Je account is aangemaakt. Je bent één setup verwijderd van een assistent die nooit meer een gesprek laat liggen.</p>
+            <p>Het duurt minder dan 10 minuten om live te gaan. Als je liever hulp hebt bij het onboarden, kun je een gratis adviesgesprek met ons inplannen.</p>
             {Cta("Start mijn onboarding", DashboardUrl + "/onboarding")}
             """));
 
-    // ── #4 · Wachtwoord reset bevestiging ─────────────────────────────────────
-
-    public (string Subject, string Html) PasswordResetConfirmed(string naam, string tijdstip) =>
-        ("Je wachtwoord is gewijzigd", Layout(
-            "Wachtwoord succesvol gewijzigd.",
-            $"""
-            <h2>Wachtwoord gewijzigd</h2>
-            <p>Hallo {naam},</p>
-            <p>Je wachtwoord is succesvol gewijzigd op <strong>{tijdstip}</strong>. Als jij dit niet was, beveilig dan direct je account.</p>
-            {Cta("Beveilig mijn account", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #6 · Onboarding start ─────────────────────────────────────────────────
-
-    public (string Subject, string Html) OnboardingStart(string naam) =>
-        ("Je assistent wacht op je — 3 stappen", Layout(
-            "Nog 5 minuten en je bent live.",
-            $"""
-            <h2>Hoi {naam}, je assistent is bijna klaar</h2>
-            <p>Je hoeft maar 3 dingen te doen:</p>
-            <ol style="padding-left:20px;margin:0 0 16px">
-              <li>Kies een telefoonnummer</li>
-              <li>Stel de begroeting in</li>
-              <li>Test een gesprek</li>
-            </ol>
-            <p>Duurt minder dan 5 minuten.</p>
-            {Cta("Start setup", DashboardUrl + "/onboarding")}
-            """));
-
-    // ── #7 · Onboarding herinnering ───────────────────────────────────────────
+    // ── #2 · Onboarding herinnering ───────────────────────────────────────────
 
     public (string Subject, string Html) OnboardingReminder(string naam) =>
-        ("Je setup is nog niet klaar ⚠️", Layout(
-            "Oproepen worden nog niet afgehandeld.",
+        ("Je setup staat nog open", Layout(
+            "Inkomende oproepen worden nog niet afgehandeld.",
             $"""
-            <h2>Hoi {naam}</h2>
-            <p>Je setup is nog niet afgerond. Dat betekent dat oproepen op dit moment nog <strong>niet</strong> worden afgehandeld door VoxFlow.</p>
-            <p>Rond de setup in 5 minuten af zodat je niets meer mist.</p>
-            {Cta("Rond setup af", DashboardUrl + "/onboarding")}
+            <p>Hoi {naam},</p>
+            <p>Je bent gisteren gestart met de setup maar hebt hem nog niet afgerond. Zolang die open staat, worden inkomende oproepen nog niet door VoxFlow afgehandeld. Wil je het vandaag afronden?</p>
+            {Cta("Rond mijn setup af", DashboardUrl + "/onboarding")}
             """));
 
     // ── #8 · Setup voltooid ───────────────────────────────────────────────────
 
     public (string Subject, string Html) SetupComplete(string naam) =>
-        ("Je bent live! 🚀", Layout(
-            "VoxFlow staat aan — elk gesprek wordt nu opgevangen.",
+        ("Je bent live, VoxFlow staat aan", Layout(
+            "Elk inkomend gesprek wordt vanaf nu afgehandeld.",
             $"""
-            <h2>{naam}, je bent live!</h2>
-            <p>VoxFlow staat aan. Elk gesprek dat je mist wordt nu automatisch door jouw AI-telefonist afgehandeld.</p>
-            <p>Bekijk je dashboard om gesprekken, afspraken en callbacks te volgen.</p>
+            <p>Hoi {naam}, je bent live!</p>
+            <p>Vanaf nu neemt VoxFlow elk inkomend gesprek voor je op. Afspraken worden direct ingepland, vragen beantwoord en urgente zaken doorverbonden naar jou. Je hoeft er niets meer voor te doen.</p>
+            <p>In je dashboard zie je alles wat er is afgehandeld, inclusief samenvattingen per gesprek.</p>
             {Cta("Ga naar mijn dashboard", DashboardUrl)}
             """));
 
     // ── #9 · Setup foutmelding ────────────────────────────────────────────────
 
     public (string Subject, string Html) SetupError(string naam, string foutOmschrijving) =>
-        ("Er is een fout opgetreden tijdens je setup", Layout(
-            "We konden je assistent niet activeren.",
+        ("Er ging iets mis bij je setup", Layout(
+            "Je assistent is nog niet actief.",
             $"""
-            <h2>Hoi {naam}, er is iets misgegaan</h2>
-            <p>We konden je assistent niet volledig activeren. Foutmelding:</p>
-            <p style="background:#fff0f0;border-left:4px solid #e53e3e;padding:12px 16px;border-radius:4px;font-family:monospace;font-size:13px">{foutOmschrijving}</p>
-            <p>Probeer het opnieuw of neem contact op met ons support-team.</p>
+            <p>Hoi {naam},</p>
+            <p>Er is iets misgegaan tijdens het activeren van je assistent. Je bent er nog niet live mee, maar dat lossen we snel op.</p>
+            <p>Foutmelding: {foutOmschrijving}</p>
+            <p>Probeer het opnieuw via de knop hieronder. Lukt het dan nog steeds niet, neem dan contact met ons op, dan we helpen je direct verder.</p>
             {Cta("Probeer opnieuw", DashboardUrl + "/onboarding")}
+            {CtaSec("Neem contact op", "mailto:support@voxflow.nl")}
+            """));
+
+    // ── #13b · Telefoonnummer nog niet gekoppeld ──────────────────────────────
+
+    public (string Subject, string Html) PhoneNumberNotLinked(string naam) =>
+        ("Nog één stap — koppel je telefoonnummer", Layout(
+            "Bellers kunnen je assistent nog niet bereiken.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je assistent is bijna klaar, maar er is nog geen telefoonnummer aan gekoppeld. Zolang dat niet is ingesteld, kunnen bellers je assistent niet bereiken.</p>
+            <p>Het koppelen duurt minder dan 2 minuten. Daarna staat alles klaar.</p>
+            {Cta("Koppel mijn nummer", DashboardUrl + "/onboarding")}
+            """));
+
+    // ── #14 · Eerste testgesprek gelukt ──────────────────────────────────────
+
+    public (string Subject, string Html) FirstCallSucceeded(string naam) =>
+        ("Je eerste gesprek is afgehandeld", Layout(
+            "Je assistent werkt — bekijk de samenvatting.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je assistent heeft zojuist zijn eerste gesprek afgehandeld. Het werkt.</p>
+            <p>In je dashboard zie je een samenvatting van wat er is gezegd en wat er is afgesproken. Zo ziet het er elke keer uit; automatisch, zonder dat jij er iets voor hoeft te doen.</p>
+            {Cta("Bekijk mijn eerste gesprek", DashboardUrl + "/gesprekken")}
+            """));
+
+    // ── #15 · Assistent instellingen niet compleet ────────────────────────────
+
+    public (string Subject, string Html) AssistantSettingsIncomplete(string naam) =>
+        ("Je assistent mist nog een paar instellingen", Layout(
+            "Vul de ontbrekende instellingen in voor optimale werking.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je assistent staat aan, maar een aantal instellingen zijn nog niet ingevuld. Daardoor werkt hij nog niet optimaal. Denk aan je openingszin, je doorschakelregels of je spoedcriteria.</p>
+            <p>Het invullen duurt een paar minuten en maakt een groot verschil in hoe je assistent overkomt bij bellers.</p>
+            {Cta("Vul mijn instellingen aan", DashboardUrl + "/instellingen")}
+            """));
+
+    // ── #T1 · Proefperiode gestart ────────────────────────────────────────────
+
+    public (string Subject, string Html) TrialStarted(string naam) =>
+        ("Je proefperiode is gestart! De 14 dagen gratis start nu", Layout(
+            "14 dagen gratis VoxFlow, geen verplichtingen.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je proefperiode is actief. De komende 14 dagen gebruik je VoxFlow gratis en zonder verplichtingen.</p>
+            <p>Onze tip: ga zo snel mogelijk live en laat je assistent een echt gesprek afhandelen. Dat is het moment waarop je voelt wat het doet.</p>
+            <p>Heb je vragen of wil je dat we even meekijken? Stuur gewoon een bericht, want we helpen je graag.</p>
+            {Cta("Ga naar mijn dashboard", DashboardUrl)}
+            """));
+
+    // ── #T2 · Proefperiode loopt af over 3 dagen ─────────────────────────────
+
+    public (string Subject, string Html) TrialExpiringSoon(string naam, string eindDatum) =>
+        ("Je proefperiode loopt over 3 dagen af", Layout(
+            "Na je proefperiode gaat je abonnement automatisch door.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je proefperiode loopt over 3 dagen af. Daarna gaat je abonnement automatisch door. Je hoeft niets te doen om VoxFlow te blijven gebruiken.</p>
+            <p>Wil je toch stoppen? Dat kan via je accountinstellingen voor {eindDatum}. Heb je vragen? Stuur ons gerust een bericht.</p>
+            {Cta("Beheer mijn abonnement", DashboardUrl + "/instellingen")}
             """));
 
     // ── #10 · Abonnement gestart ──────────────────────────────────────────────
 
     public (string Subject, string Html) SubscriptionStarted(string naam, string abonnement, string startdatum, string volgendeFactuur) =>
         ("Je abonnement is actief", Layout(
-            $"Welkom bij VoxFlow {abonnement}.",
+            $"VoxFlow {abonnement} is actief.",
             $"""
-            <h2>Abonnement actief, {naam}!</h2>
-            <p>Bedankt. Je <strong>{abonnement}</strong>-abonnement is actief.</p>
-            <div class="stats"><table>
-              <tr><td>Plan</td><td>{abonnement}</td></tr>
-              <tr><td>Startdatum</td><td>{startdatum}</td></tr>
-              <tr><td>Volgende factuur</td><td>{volgendeFactuur}</td></tr>
-            </table></div>
-            {Cta("Ga naar mijn account", DashboardUrl)}
+            <p>Hoi {naam},</p>
+            <p>Je abonnement is actief. Plan: <strong>{abonnement}</strong> | Startdatum: {startdatum} | Volgende factuur: {volgendeFactuur}.</p>
+            <p>Vanaf nu staat VoxFlow elke dag voor je klaar. Mocht er ooit iets zijn, weet je ons te vinden.</p>
+            {Cta("Ga naar mijn dashboard", DashboardUrl)}
             """));
 
     // ── #11 · Abonnement geüpgraded ───────────────────────────────────────────
 
     public (string Subject, string Html) SubscriptionUpgraded(string naam, string nieuwPlan, IEnumerable<string> nieuweFeatures) =>
-        ($"Je bent geüpgraded naar {nieuwPlan} 🎉", Layout(
-            $"Nieuwe functies beschikbaar.",
+        ($"Je gebruikt nu pakket {nieuwPlan}", Layout(
+            "Upgrade geslaagd — nieuwe functies staan klaar.",
             $"""
-            <h2>Upgrade geslaagd, {naam}!</h2>
-            <p>Je gebruikt nu het <strong>{nieuwPlan}</strong>-pakket. Je hebt nu toegang tot:</p>
-            <ul style="padding-left:20px;margin:0 0 16px">
-              {string.Join("", nieuweFeatures.Select(f => $"<li>{f}</li>"))}
-            </ul>
+            <p>Hoi {naam}, je upgrade is geslaagd.</p>
+            <p>Je gebruikt nu het <strong>{nieuwPlan}</strong>-pakket. Je hebt nu toegang tot {string.Join(" en ", nieuweFeatures)}. Die staan direct klaar in je dashboard.</p>
             {Cta("Ontdek de nieuwe functies", DashboardUrl)}
             """));
 
-    // ── #12 · Abonnement gedowngrade ──────────────────────────────────────────
+    // ── #12 · Abonnement gedowngraded ─────────────────────────────────────────
 
     public (string Subject, string Html) SubscriptionDowngraded(string naam, string nieuwPlan, string ingangsDatum, IEnumerable<string> vervaldeFeatures) =>
         ($"Je plan is gewijzigd naar {nieuwPlan}", Layout(
             $"Pakketwijziging per {ingangsDatum}.",
             $"""
-            <h2>Pakket gewijzigd, {naam}</h2>
-            <p>Je abonnement is gewijzigd naar <strong>{nieuwPlan}</strong> per <strong>{ingangsDatum}</strong>.</p>
-            <p>De volgende functies zijn niet meer beschikbaar:</p>
-            <ul style="padding-left:20px;margin:0 0 16px">
-              {string.Join("", vervaldeFeatures.Select(f => $"<li>{f}</li>"))}
-            </ul>
+            <p>Hoi {naam},</p>
+            <p>Je abonnement is gewijzigd naar <strong>{nieuwPlan}</strong> per {ingangsDatum}. Vanaf dan zijn {string.Join(" en ", vervaldeFeatures)} niet meer beschikbaar.</p>
+            <p>Wil je later toch weer upgraden? Dat kan altijd via je accountinstellingen.</p>
             {Cta("Beheer mijn abonnement", DashboardUrl + "/instellingen")}
             """));
 
@@ -177,130 +203,157 @@ public class EmailTemplateService
         ("Je abonnement is opgezegd", Layout(
             $"Toegang tot {eindDatum}.",
             $"""
-            <h2>Tot ziens, {naam}</h2>
-            <p>Je abonnement is opgezegd. Je hebt toegang tot <strong>{eindDatum}</strong>.</p>
-            <p>Wil je VoxFlow toch nog een kans geven? Je kunt altijd opnieuw starten.</p>
+            <p>Hoi {naam},</p>
+            <p>Je abonnement is opgezegd. Je hebt nog toegang tot {eindDatum}. Tot die tijd handelt VoxFlow gewoon je gesprekken af.</p>
+            <p>Mocht je van gedachten veranderen of wil je iets bespreken, horen wij het graag.</p>
             {Cta("Abonnement heractiveren", DashboardUrl + "/instellingen")}
+            """));
+
+    // ── #F1 · Factuur beschikbaar ─────────────────────────────────────────────
+
+    public (string Subject, string Html) InvoiceAvailable(string naam, string maand, string bedrag, string periodeVan, string periodeTot, string factuurUrl) =>
+        ($"Je factuur van {maand} staat klaar", Layout(
+            $"Factuur {maand} — €{bedrag}.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je factuur van {maand} is beschikbaar. Bedrag: €{bedrag} | Periode: {periodeVan} t/m {periodeTot}.</p>
+            <p>De betaling wordt automatisch verwerkt via je betaalmethode. Je hoeft niets te doen.</p>
+            {Cta("Bekijk mijn factuur", factuurUrl)}
+            """));
+
+    // ── #B1 · Betaling mislukt ────────────────────────────────────────────────
+
+    public (string Subject, string Html) PaymentFailed(string naam, string bedrag) =>
+        ("Je betaling is niet gelukt", Layout(
+            "Controleer je betaalgegevens.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>De automatische betaling van €{bedrag} is niet gelukt. Dat kan gebeuren, je account staat gewoon nog aan en je mist niets.</p>
+            <p>Controleer even je betaalgegevens zodat de volgende poging wel lukt. Mocht er iets zijn, neem dan gerust contact op.</p>
+            {Cta("Controleer mijn betaalgegevens", DashboardUrl + "/instellingen")}
             """));
 
     // ── #18 · Account tijdelijk beperkt ───────────────────────────────────────
 
     public (string Subject, string Html) AccountRestricted(string naam, string bedrag) =>
         ("Je account is tijdelijk beperkt", Layout(
-            "Onbetaalde factuur — betaal nu om door te gaan.",
+            "Openstaande betaling — herstel je account.",
             $"""
-            <h2>Actie vereist, {naam}</h2>
-            <p>Je account is tijdelijk beperkt wegens een openstaande factuur van <strong>€{bedrag}</strong>.</p>
-            <p>Betaal nu om je account direct te herstellen en geen gesprekken te missen.</p>
-            {Cta("Betaal nu en herstel account", DashboardUrl + "/instellingen")}
+            <p>Hoi {naam},</p>
+            <p>Je account is tijdelijk beperkt omdat een betaling van €{bedrag} nog openstaat. VoxFlow handelt op dit moment geen gesprekken af.</p>
+            <p>Rond de betaling af om je account direct te herstellen.</p>
+            {Cta("Betaal nu en herstel mijn account", DashboardUrl + "/instellingen")}
             """));
 
-    // ── #21 · Wekelijks rapport ───────────────────────────────────────────────
+    // ── #W1 · Eerste week samenvatting ────────────────────────────────────────
 
-    public (string Subject, string Html) WeeklyReport(string naam, int gesprekken, int doorverbonden, int voicemails, string gemiddeldeDuur, int weekNummer) =>
-        ($"Jouw weekoverzicht — week {weekNummer}", Layout(
-            $"{gesprekken} gesprekken afgehandeld.",
+    public (string Subject, string Html) FirstWeekSummary(string naam, int gesprekken, int afspraken, int doorverbonden) =>
+        ("Je eerste week met VoxFlow", Layout(
+            $"{gesprekken} gesprekken afgehandeld in je eerste week.",
             $"""
-            <h2>Week {weekNummer} — jouw overzicht</h2>
-            <p>Hallo {naam}, dit is wat VoxFlow deze week voor je deed:</p>
-            <div class="stats"><table>
-              <tr><td>Gesprekken afgehandeld</td><td>{gesprekken}</td></tr>
-              <tr><td>Doorverbonden</td><td>{doorverbonden}</td></tr>
-              <tr><td>Voicemails</td><td>{voicemails}</td></tr>
-              <tr><td>Gemiddelde gespreksduur</td><td>{gemiddeldeDuur}</td></tr>
-            </table></div>
-            {Cta("Bekijk volledig rapport", DashboardUrl + "/gesprekken")}
+            <p>Hoi {naam},</p>
+            <p>Je bent een week live. Dit heeft VoxFlow voor je gedaan: <strong>{gesprekken}</strong> gesprekken afgehandeld, <strong>{afspraken}</strong> afspraken ingepland en <strong>{doorverbonden}</strong> keer doorverbonden naar jou.</p>
+            <p>In je dashboard zie je een volledig overzicht per gesprek. Alles wat je hebt gemist zonder het te weten, VoxFlow heeft het opgevangen.</p>
+            {Cta("Bekijk mijn weekoverzicht", DashboardUrl + "/gesprekken")}
             """));
 
-    // ── #22 · Maandelijks rapport ─────────────────────────────────────────────
+    // ── #22 · Maandrapport ────────────────────────────────────────────────────
 
-    public (string Subject, string Html) MonthlyReport(string naam, string maand, int totaalGesprekken, string besteDag, string groeiPercentage, string klanttevredenheidScore) =>
-        ($"Jouw maandoverzicht — {maand}", Layout(
+    public (string Subject, string Html) MonthlyReport(string naam, string maand, int totaalGesprekken, string besteDag, string groeiPercentage, int doorverbonden) =>
+        ($"Jouw maand — {maand}", Layout(
             $"{totaalGesprekken} gesprekken in {maand}.",
             $"""
-            <h2>{maand} — jouw maandoverzicht</h2>
-            <p>Hallo {naam}, hier is wat VoxFlow in {maand} voor je deed:</p>
-            <div class="stats"><table>
-              <tr><td>Totaal gesprekken</td><td>{totaalGesprekken}</td></tr>
-              <tr><td>Drukste dag</td><td>{besteDag}</td></tr>
-              <tr><td>Groei t.o.v. vorige maand</td><td>{groeiPercentage}</td></tr>
-              <tr><td>Klanttevredenheid</td><td>{klanttevredenheidScore}</td></tr>
-            </table></div>
+            <p>Hoi {naam}, hier is je maandoverzicht.</p>
+            <p>Totaal gesprekken: <strong>{totaalGesprekken}</strong> | Drukste dag: <strong>{besteDag}</strong> | Groei t.o.v. vorige maand: <strong>{groeiPercentage}</strong> | Doorverbonden: <strong>{doorverbonden}</strong>.</p>
+            <p>Een volledig overzicht staat klaar in je dashboard.</p>
             {Cta("Bekijk volledig rapport", DashboardUrl + "/gesprekken")}
+            """));
+
+    // ── #G1 · Gesprekslimiet bijna bereikt ────────────────────────────────────
+
+    public (string Subject, string Html) CallLimitAlmostReached(string naam, int gebruikt, int limiet) =>
+        ($"Je gebruikt {gebruikt * 100 / limiet}% van je gesprekslimiet", Layout(
+            $"{gebruikt} van {limiet} gesprekken gebruikt.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je hebt deze maand al <strong>{gebruikt}</strong> van je <strong>{limiet}</strong> gesprekken gebruikt. Je zit op 80% van je limiet.</p>
+            <p>Wat er gebeurt als je limiet bereikt is, hangt af van jouw instelling. Heb je gekozen voor automatisch doorgaan? Dan worden extra gesprekken buiten je bundel afgehandeld en gefactureerd. Heb je gekozen voor stoppen? Dan pauzeert VoxFlow totdat je volgende factuurperiode begint.</p>
+            <p>Wil je je instelling aanpassen of upgraden naar een hoger plan? Dat kan via je accountinstellingen.</p>
+            {Cta("Bekijk mijn instelling", DashboardUrl + "/instellingen")}
+            {CtaSec("Upgrade mijn abonnement", DashboardUrl + "/instellingen?tab=abo")}
+            """));
+
+    // ── #G2 · Gesprekslimiet bereikt ─────────────────────────────────────────
+
+    public (string Subject, string Html) CallLimitReached(string naam, int limiet, string volgendeFactuurDatum) =>
+        ("Je gesprekslimiet is bereikt", Layout(
+            $"Maandlimiet van {limiet} gesprekken bereikt.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je maandlimiet van <strong>{limiet}</strong> gesprekken is bereikt.</p>
+            <p>Wat er nu gebeurt hangt af van jouw instelling. Heb je gekozen voor automatisch doorgaan? Dan handelt VoxFlow extra gesprekken buiten je bundel af — deze worden gefactureerd bij je volgende factuur. Heb je gekozen voor stoppen? Dan pauzeert VoxFlow totdat je volgende factuurperiode begint op {volgendeFactuurDatum}.</p>
+            <p>Wil je je instelling aanpassen of upgraden? Dat kan direct via je accountinstellingen.</p>
+            {Cta("Bekijk mijn instelling", DashboardUrl + "/instellingen")}
+            {CtaSec("Upgrade mijn abonnement", DashboardUrl + "/instellingen?tab=abo")}
             """));
 
     // ── #23 · Inactief 7 dagen ────────────────────────────────────────────────
 
     public (string Subject, string Html) Inactive7Days(string naam) =>
-        ("7 dagen niet ingelogd — mogelijk gemiste gesprekken", Layout(
-            "Er kunnen gesprekken op je wachten.",
+        ("Er staan gesprekken op je te wachten", Layout(
+            "7 dagen niet ingelogd — er wachten gesprekken op je.",
             $"""
-            <h2>Hoi {naam}</h2>
-            <p>Je hebt de afgelopen 7 dagen niet ingelogd. Ondertussen zijn er mogelijk gesprekken afgehandeld die jou interesseren.</p>
+            <p>Hoi {naam},</p>
+            <p>Je hebt de afgelopen 7 dagen niet ingelogd. VoxFlow heeft ondertussen gewoon doorgewerkt en er staan waarschijnlijk samenvattingen en gesprekken op je te wachten.</p>
             {Cta("Log in en bekijk mijn gesprekken", DashboardUrl + "/gesprekken")}
-            """));
-
-    // ── #24 · Inactief 14 dagen ───────────────────────────────────────────────
-
-    public (string Subject, string Html) Inactive14Days(string naam, int aantalGesprekken) =>
-        ("14 dagen inactief — je hebt gesprekken gemist", Layout(
-            $"We hebben {aantalGesprekken} gesprekken voor je afgehandeld.",
-            $"""
-            <h2>Hoi {naam}</h2>
-            <p>14 dagen niet ingelogd. In die tijd heeft VoxFlow <strong>{aantalGesprekken} gesprekken</strong> voor je afgehandeld. Weet je wat daarin zat?</p>
-            {Cta("Bekijk mijn gemiste gesprekken", DashboardUrl + "/gesprekken")}
             """));
 
     // ── #25 · Inactief 30 dagen ───────────────────────────────────────────────
 
-    public (string Subject, string Html) Inactive30Days(string naam) =>
-        ("Is VoxFlow nog iets voor je?", Layout(
+    public (string Subject, string Html) Inactive30Days(string naam, int aantalGesprekken) =>
+        ("Nog steeds iets voor je?", Layout(
             "Al een maand niet ingelogd.",
             $"""
-            <h2>Hoi {naam}</h2>
-            <p>Je hebt al een maand niet ingelogd. Is VoxFlow nog iets voor je? We horen graag van je.</p>
-            {Cta("Neem contact op", "mailto:support@voxflow.nl")}
-            <br>
+            <p>Hoi {naam},</p>
+            <p>Je hebt al een maand niet ingelogd. VoxFlow heeft in die tijd <strong>{aantalGesprekken}</strong> gesprekken voor je afgehandeld, maar we vragen ons af of alles nog goed gaat.</p>
+            <p>Is er iets wat beter kan? Iets wat je mist? We horen het graag.</p>
             {Cta("Log opnieuw in", DashboardUrl)}
+            {CtaSec("Neem contact op", "mailto:support@voxflow.nl")}
             """));
 
-    // ── #26 · Re-activatie ────────────────────────────────────────────────────
+    // ── #43 · Win-back dag 1 ──────────────────────────────────────────────────
 
-    public (string Subject, string Html) ReActivated(string naam) =>
-        ("Welkom terug bij VoxFlow! 👋", Layout(
-            "Je account staat klaar.",
+    public (string Subject, string Html) WinBack1(string naam, int aantalGesprekken) =>
+        ("Je hebt opgezegd — we begrijpen het", Layout(
+            "Altijd welkom terug.",
             $"""
-            <h2>Welkom terug, {naam}!</h2>
-            <p>Fijn dat je er weer bent. Je account is actief en alles staat klaar — je assistent vangt elk gesprek op dat je mist.</p>
-            {Cta("Ga naar mijn dashboard", DashboardUrl)}
+            <p>Hoi {naam},</p>
+            <p>Je hebt je abonnement opgezegd. Dat respecteren we. In de periode dat je VoxFlow gebruikte, werden er <strong>{aantalGesprekken}</strong> gesprekken voor je afgehandeld. Gesprekken die je anders zelf had moeten opvangen of had gemist.</p>
+            <p>Als er een reden is waarom het niet paste, horen we dat graag. Niet om je terug te winnen, maar omdat we er beter van willen worden.</p>
+            {Cta("Deel mijn feedback", "mailto:support@voxflow.nl")}
+            {CtaSec("Herstart mijn abonnement", DashboardUrl + "/instellingen")}
             """));
 
-    // ── #33 · Feedback verzoek ────────────────────────────────────────────────
+    // ── #4 · Wachtwoord gewijzigd ─────────────────────────────────────────────
 
-    public (string Subject, string Html) FeedbackRequest(string naam, string ticketId) =>
-        ("Hoe was je ervaring met VoxFlow-support?", Layout(
-            "Jouw mening telt.",
+    public (string Subject, string Html) PasswordResetConfirmed(string naam, string tijdstip) =>
+        ("Je wachtwoord is gewijzigd", Layout(
+            "Wachtwoord succesvol gewijzigd.",
             $"""
-            <h2>Hoi {naam}</h2>
-            <p>Je supportvraag (#{ticketId}) is opgelost. Hoe was je ervaring?</p>
-            <p>Jouw feedback helpt ons om VoxFlow beter te maken.</p>
-            {Cta("Geef feedback", "https://voxflow.nl/feedback?ticket=" + ticketId)}
+            <p>Hoi {naam},</p>
+            <p>Je wachtwoord is succesvol gewijzigd op {tijdstip}. Als jij dit was, hoef je niets te doen.</p>
+            <p>Was jij dit niet? Beveilig dan direct je account via de knop hieronder.</p>
+            {Cta("Beveilig mijn account", DashboardUrl + "/instellingen")}
             """));
 
-    // ── #34 · Nieuwe login gedetecteerd ──────────────────────────────────────
+    // ── #34 · Nieuwe inlog gedetecteerd ──────────────────────────────────────
 
     public (string Subject, string Html) NewLoginDetected(string naam, string apparaat, string locatie, string tijdstip) =>
-        ("Nieuwe inlog op je VoxFlow-account", Layout(
+        ("Nieuwe inlog op je account", Layout(
             "Nieuwe inlog gedetecteerd — was jij dit?",
             $"""
-            <h2>Nieuwe inlog gedetecteerd</h2>
-            <p>Hallo {naam},</p>
-            <p>Er is ingelogd op je account vanaf een nieuw apparaat of locatie:</p>
-            <div class="stats"><table>
-              <tr><td>Apparaat</td><td>{apparaat}</td></tr>
-              <tr><td>Locatie</td><td>{locatie}</td></tr>
-              <tr><td>Tijdstip</td><td>{tijdstip}</td></tr>
-            </table></div>
+            <p>Hoi {naam},</p>
+            <p>Er is ingelogd op je VoxFlow-account vanaf een nieuw apparaat of locatie. Apparaat: <strong>{apparaat}</strong> | Locatie: <strong>{locatie}</strong> | Tijdstip: <strong>{tijdstip}</strong>.</p>
             <p>Was jij dit? Dan hoef je niets te doen. Was jij dit niet, beveilig dan direct je account.</p>
             {Cta("Mijn account beveiligen", DashboardUrl + "/instellingen")}
             """));
@@ -311,191 +364,152 @@ public class EmailTemplateService
         ("Je account is tijdelijk vergrendeld", Layout(
             "Te veel mislukte inlogpogingen.",
             $"""
-            <h2>Account vergrendeld</h2>
-            <p>Hallo {naam},</p>
-            <p>Je account is tijdelijk vergrendeld wegens te veel mislukte inlogpogingen op <strong>{tijdstip}</strong>.</p>
-            <p>Probeer het over 15 minuten opnieuw of reset je wachtwoord.</p>
+            <p>Hoi {naam},</p>
+            <p>Je account is tijdelijk vergrendeld na te veel mislukte inlogpogingen. Probeer over 15 minuten opnieuw, of reset direct je wachtwoord.</p>
             {Cta("Wachtwoord resetten", "https://voxflow.nl/login")}
             """));
 
-    // ── #43 · Win-back dag 1 ──────────────────────────────────────────────────
+    // ── #VJ · Verjaardag account ──────────────────────────────────────────────
 
-    public (string Subject, string Html) WinBack1(string naam, int aantalGesprekken) =>
-        ("Je hebt VoxFlow opgezegd — altijd welkom terug", Layout(
-            "We missen je al.",
+    public (string Subject, string Html) AccountBirthday(string naam, int aantalGesprekken) =>
+        ("Eén jaar VoxFlow! dank je wel", Layout(
+            "Een jaar geleden gestart — bedankt.",
             $"""
-            <h2>Tot ziens, {naam}</h2>
-            <p>Je hebt je abonnement opgezegd. In de periode dat je VoxFlow gebruikte, werden er <strong>{aantalGesprekken} gesprekken</strong> voor je afgehandeld.</p>
-            <p>Mocht je van gedachten veranderen, ben je altijd welkom terug.</p>
-            {Cta("Herstart mijn abonnement", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #44 · Win-back dag 7 ──────────────────────────────────────────────────
-
-    public (string Subject, string Html) WinBack7(string naam, int kortingsPercentage, string aanbiedingGeldigTot) =>
-        ($"Kom terug met {kortingsPercentage}% korting", Layout(
-            $"Speciale aanbieding — geldig tot {aanbiedingGeldigTot}.",
-            $"""
-            <h2>Hoi {naam}, we hebben een aanbod voor je</h2>
-            <p>Kom terug naar VoxFlow en krijg <strong>{kortingsPercentage}% korting</strong> op je eerste maand.</p>
-            <p><em>Aanbieding geldig tot {aanbiedingGeldigTot}.</em></p>
-            {Cta("Kom terug met korting", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #45 · Win-back dag 30 ─────────────────────────────────────────────────
-
-    public (string Subject, string Html) WinBack30(string naam) =>
-        ("Nog op zoek naar een telefonische bereikbaarheidsoplossing?", Layout(
-            "Kijk wat er nieuw is bij VoxFlow.",
-            $"""
-            <h2>Hoi {naam}</h2>
-            <p>Ben je nog op zoek naar een manier om elk telefoontje op te vangen, ook als je er niet bent?</p>
-            <p>VoxFlow heeft de afgelopen maanden nieuwe functies gekregen. Misschien is het nu wél precies wat je nodig hebt.</p>
-            {Cta("Bekijk wat er nieuw is bij VoxFlow", "https://voxflow.nl")}
-            """));
-
-    // ── #48 · Team lid verwijderd ─────────────────────────────────────────────
-
-    public (string Subject, string Html) TeamMemberRemoved(string naam, string bedrijfsNaam) =>
-        ($"Je bent verwijderd uit {bedrijfsNaam}", Layout(
-            "Je toegang is ingetrokken.",
-            $"""
-            <h2>Hoi {naam}</h2>
-            <p>Je bent verwijderd uit het VoxFlow-team van <strong>{bedrijfsNaam}</strong>.</p>
-            <p>Je hebt geen toegang meer tot de gedeelde omgeving. Als je denkt dat dit een vergissing is, neem dan contact op met de beheerder.</p>
+            <p>Hoi {naam},</p>
+            <p>Precies een jaar geleden ben je gestart met VoxFlow. In die tijd heeft je assistent <strong>{aantalGesprekken}</strong> gesprekken afgehandeld — gesprekken die jij anders zelf had moeten beantwoorden of had gemist.</p>
+            <p>Bedankt dat je ons het vertrouwen hebt gegeven. Als kleine blijk van waardering: wist je dat je met een jaarabonnement twee maanden gratis krijgt ten opzichte van maandelijks betalen? Als je toch al blij bent met VoxFlow, is dit het moment om over te stappen.</p>
+            {Cta("Stap over naar jaarabonnement", DashboardUrl + "/instellingen?tab=abo")}
+            {CtaSec("Bekijk mijn jaarsamenvatting", DashboardUrl + "/gesprekken")}
             """));
 
     // ── #50 · Integratie gekoppeld ────────────────────────────────────────────
 
     public (string Subject, string Html) IntegrationConnected(string naam, string integratieNaam) =>
-        ($"{integratieNaam} succesvol gekoppeld", Layout(
+        ($"{integratieNaam} is gekoppeld", Layout(
             "Synchronisatie actief.",
             $"""
-            <h2>{integratieNaam} is gekoppeld, {naam}!</h2>
-            <p>De koppeling met <strong>{integratieNaam}</strong> is succesvol. Gesprekken en afspraken worden nu automatisch gesynchroniseerd.</p>
-            {Cta("Bekijk integratie-instellingen", DashboardUrl + "/instellingen")}
+            <p>Hoi {naam},</p>
+            <p>{integratieNaam} is succesvol gekoppeld aan VoxFlow. Synchronisatie is actief en afspraken die worden ingepland via je assistent verschijnen voortaan direct in {integratieNaam}.</p>
+            {Cta("Bekijk mijn integratie-instellingen", DashboardUrl + "/instellingen")}
             """));
 
-    // ── #51 · Integratie foutmelding ──────────────────────────────────────────
+    // ── #51 · Integratie fout ─────────────────────────────────────────────────
 
     public (string Subject, string Html) IntegrationError(string naam, string integratieNaam, string foutCode) =>
-        ($"Fout in je {integratieNaam}-koppeling", Layout(
+        ($"Er is een fout in je {integratieNaam}-koppeling", Layout(
             "Synchronisatie mislukt.",
             $"""
-            <h2>Fout in {integratieNaam}-koppeling</h2>
-            <p>Hallo {naam},</p>
-            <p>Er is een fout opgetreden in je <strong>{integratieNaam}</strong>-koppeling (code: <code>{foutCode}</code>).</p>
-            <p>Controleer je instellingen of herstel de koppeling om synchronisatie te hervatten.</p>
-            {Cta("Bekijk integratie", DashboardUrl + "/instellingen")}
+            <p>Hoi {naam},</p>
+            <p>De synchronisatie met <strong>{integratieNaam}</strong> is mislukt (foutcode: {foutCode}). Daardoor worden afspraken mogelijk niet correct doorgezet.</p>
+            <p>Controleer je instellingen of neem contact op als je er niet uitkomt.</p>
+            {Cta("Bekijk mijn integratie", DashboardUrl + "/instellingen")}
+            {CtaSec("Neem contact op", "mailto:support@voxflow.nl")}
             """));
 
     // ── #52 · Integratie verbroken ────────────────────────────────────────────
 
     public (string Subject, string Html) IntegrationExpired(string naam, string integratieNaam) =>
         ($"Verbinding met {integratieNaam} verbroken", Layout(
-            "Toegangstoken verlopen — herstel de koppeling.",
+            "Toegang verlopen — herstel de koppeling.",
             $"""
-            <h2>Koppeling verbroken</h2>
-            <p>Hallo {naam},</p>
-            <p>De verbinding met <strong>{integratieNaam}</strong> is verbroken, waarschijnlijk omdat het toegangstoken is verlopen.</p>
-            <p>Herstel de koppeling om synchronisatie te hervatten.</p>
+            <p>Hoi {naam},</p>
+            <p>De verbinding met <strong>{integratieNaam}</strong> is verbroken, waarschijnlijk omdat de toegang is verlopen. Herstel de koppeling zodat alles weer synchroon loopt.</p>
             {Cta("Herstel koppeling", DashboardUrl + "/instellingen")}
             """));
 
-    // ── #53 · Referral uitgenodigd ────────────────────────────────────────────
-
-    public (string Subject, string Html) ReferralSent(string naam, string uitgenodigdEmail) =>
-        ("Je uitnodiging is verstuurd", Layout(
-            "Beloning zodra ze aanmelden en betalen.",
-            $"""
-            <h2>Uitnodiging verstuurd!</h2>
-            <p>Hallo {naam},</p>
-            <p>Je uitnodiging is verstuurd naar <strong>{uitgenodigdEmail}</strong>. Zodra zij aanmelden en na hun proefperiode betalen, ontvang jij een maand gratis.</p>
-            {Cta("Deel mijn referrallink", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #54 · Referral succes ─────────────────────────────────────────────────
-
-    public (string Subject, string Html) ReferralSuccess(string naam, string naamVriend) =>
-        ($"{naamVriend} heeft betaald via jouw link 🎉", Layout(
-            "Je beloning wordt verwerkt.",
-            $"""
-            <h2>Goed nieuws, {naam}!</h2>
-            <p><strong>{naamVriend}</strong> heeft zich aangemeld en betaald via jouw referrallink.</p>
-            <p>Je beloning (1 maand gratis) wordt binnenkort verwerkt en automatisch verrekend met je volgende factuur.</p>
-            {Cta("Bekijk mijn referrals", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #55 · Referral beloning ───────────────────────────────────────────────
-
-    public (string Subject, string Html) ReferralRewarded(string naam, string beloningBedrag) =>
-        ("Je referral-beloning is toegevoegd ✨", Layout(
-            $"€{beloningBedrag} tegoed op je account.",
-            $"""
-            <h2>Beloning toegevoegd, {naam}!</h2>
-            <p>Je referral-beloning van <strong>€{beloningBedrag}</strong> is toegevoegd aan je account. Het wordt automatisch verrekend met je volgende factuur.</p>
-            {Cta("Bekijk mijn voordelen", DashboardUrl + "/instellingen")}
-            <br>
-            {Cta("Deel mijn referrallink", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #56 · WhatsApp geactiveerd (naar bedrijf) ─────────────────────────────
-
-    public (string Subject, string Html) WhatsAppActivated(string naam, string phoneNumber) =>
-        ("WhatsApp Business is nu actief!", Layout(
-            "Uw klanten kunnen nu bereikt worden via WhatsApp.",
-            $"""
-            <h2>WhatsApp Business is actief, {naam}!</h2>
-            <p>Goed nieuws! WhatsApp Business is nu ingeschakeld voor uw VoxFlow-assistent.</p>
-            <p>Uw klanten kunnen voortaan via WhatsApp berichten ontvangen vanaf <strong>{phoneNumber}</strong>.</p>
-            <p>Afspraakbevestigingen, herinneringen en terugbelbevestigingen worden nu automatisch verstuurd.</p>
-            {Cta("Bekijk mijn integraties", DashboardUrl + "/instellingen")}
-            """));
-
-    // ── #57 · WhatsApp aanvraag (intern naar admin) ───────────────────────────
-
-    public (string Subject, string Html) WhatsAppRequestedAdmin(string companyName, short companyId, string phoneNumber) =>
-        ($"WhatsApp-aanvraag: {companyName}", Layout(
-            $"{companyName} wil WhatsApp activeren.",
-            $"""
-            <h2>Nieuwe WhatsApp-aanvraag</h2>
-            <p><strong>Bedrijf:</strong> {companyName} (ID: {companyId})</p>
-            <p><strong>Telefoonnummer:</strong> {phoneNumber}</p>
-            <p>Registreer dit nummer als WhatsApp-sender in de Meta Business Manager en klik daarna op Activeer in het admin panel.</p>
-            {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
-            """));
-
-    // ── #58 · Integratie wachtlijst bevestiging (naar klant) ─────────────────
+    // ── #58 · Wachtlijst bevestiging ─────────────────────────────────────────
 
     public (string Subject, string Html) IntegrationNotifyConfirm(string naam, string integratieNaam) =>
-        ($"Je staat op de wachtlijst voor {integratieNaam}", Layout(
-            $"Je hoort het als {integratieNaam} live gaat!",
+        ($"Je staat op de lijst voor {integratieNaam}", Layout(
+            $"Je hoort het zodra {integratieNaam} beschikbaar is.",
             $"""
-            <h2>Je staat op de lijst, {naam}!</h2>
-            <p>We hebben je aanvraag ontvangen. Zodra <strong>{integratieNaam}</strong> beschikbaar is in VoxFlow, sturen we je een bericht.</p>
-            <p>We werken hier actief aan — je bent er vroeg bij.</p>
+            <p>Hoi {naam},</p>
+            <p>Je staat op de wachtlijst voor <strong>{integratieNaam}</strong>. Zodra de integratie beschikbaar is, laten we het je direct weten.</p>
             {Cta("Bekijk mijn integraties", DashboardUrl + "/integraties")}
             """));
 
-    // ── #59 · Integratie is nu live (naar klant) ──────────────────────────────
+    // ── #59 · Integratie nu live ──────────────────────────────────────────────
 
     public (string Subject, string Html) IntegrationNowLive(string naam, string integratieNaam) =>
-        ($"{integratieNaam} is nu beschikbaar!", Layout(
-            $"Goed nieuws: {integratieNaam} is live.",
+        ($"{integratieNaam} is nu beschikbaar", Layout(
+            $"{integratieNaam} is nu live in VoxFlow.",
             $"""
-            <h2>Goed nieuws, {naam}!</h2>
-            <p><strong>{integratieNaam}</strong> is nu beschikbaar in VoxFlow. Je kunt het direct activeren via je integratiepagina.</p>
-            {Cta("Integratie activeren", DashboardUrl + "/integraties")}
+            <p>Hoi {naam},</p>
+            <p>Goed nieuws! <strong>{integratieNaam}</strong> is nu beschikbaar in VoxFlow. Je kunt hem direct activeren via je integratie-instellingen.</p>
+            {Cta($"Activeer {integratieNaam}", DashboardUrl + "/integraties")}
+            """));
+
+    // ── #56 · WhatsApp geactiveerd ────────────────────────────────────────────
+
+    public (string Subject, string Html) WhatsAppActivated(string naam, string phoneNumber) =>
+        ("WhatsApp Business is actief", Layout(
+            "Bellers kunnen nu berichten ontvangen via WhatsApp.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>WhatsApp Business is actief voor jouw account. Bellers kunnen voortaan berichten ontvangen via <strong>{phoneNumber}</strong>. Alles loopt automatisch via VoxFlow.</p>
+            {Cta("Bekijk mijn WhatsApp-instellingen", DashboardUrl + "/integraties")}
+            """));
+
+    // ── #54 · Referral succesvol ──────────────────────────────────────────────
+
+    public (string Subject, string Html) ReferralSuccess(string naam, string naamVriend) =>
+        ($"{naamVriend} heeft zich aangemeld via jouw link", Layout(
+            "Je beloning wordt verrekend met je volgende factuur.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p><strong>{naamVriend}</strong> heeft zich aangemeld en betaald via jouw referrallink. Je beloning, één maand gratis, wordt verrekend met je volgende factuur.</p>
+            {Cta("Bekijk mijn referrals", DashboardUrl + "/instellingen")}
+            """));
+
+    // ── #55 · Referral beloning toegekend ────────────────────────────────────
+
+    public (string Subject, string Html) ReferralRewarded(string naam, string beloningBedrag) =>
+        ("Je referral-beloning is toegevoegd", Layout(
+            $"€{beloningBedrag} tegoed op je account.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je referral-beloning van <strong>€{beloningBedrag}</strong> is toegevoegd aan je account. Die wordt automatisch verrekend met je volgende factuur.</p>
+            {Cta("Bekijk mijn voordelen", DashboardUrl + "/instellingen")}
+            {CtaSec("Deel mijn referrallink", DashboardUrl + "/instellingen")}
+            """));
+
+    // ── #57 · WhatsApp aanvraag (intern → admin) ──────────────────────────────
+
+    public (string Subject, string Html) WhatsAppRequestedAdmin(string companyName, short companyId, string phoneNumber) =>
+        ($"WhatsApp-aanvraag: {companyName}", Layout(
+            $"{companyName} vraagt WhatsApp Business aan.",
+            $"""
+            <p>Bedrijf: <strong>{companyName}</strong> (ID: {companyId})</p>
+            <p>Telefoonnummer: <strong>{phoneNumber}</strong></p>
+            {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
+            """));
+
+    // ── #60 · Wachtlijst aanvraag integratie (intern → admin) ────────────────
+
+    public (string Subject, string Html) IntegrationNotifyAdmin(string companyName, short companyId, string integratieNaam) =>
+        ($"Wachtlijst: {integratieNaam} — {companyName}", Layout(
+            $"{companyName} wil {integratieNaam}.",
+            $"""
+            <p>Bedrijf: <strong>{companyName}</strong> (ID: {companyId})</p>
+            <p>Integratie: <strong>{integratieNaam}</strong></p>
+            {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
             """));
 
     // ── Owner event notifications ─────────────────────────────────────────────
+
+    public (string Subject, string Html) TeamMemberRemoved(string naam, string bedrijfsNaam) =>
+        ($"Je bent verwijderd uit {bedrijfsNaam}", Layout(
+            "Je toegang is ingetrokken.",
+            $"""
+            <p>Hoi {naam},</p>
+            <p>Je bent verwijderd uit het VoxFlow-team van <strong>{bedrijfsNaam}</strong>. Je hebt geen toegang meer tot de gedeelde omgeving. Als je denkt dat dit een vergissing is, neem dan contact op met de beheerder.</p>
+            """));
 
     public (string Subject, string Html) OwnerAppointmentCreated(
         string companyName, string? customerName, string type, DateTimeOffset startTime, string? callerPhone) =>
         ($"Nieuwe afspraak: {customerName ?? "klant"} – {type}", Layout(
             $"Afspraak ingepland op {startTime:dd-MM-yyyy HH:mm}.",
             $"""
-            <h2>Nieuwe afspraak ingepland</h2>
             <p>Via uw VoxFlow-assistent is zojuist een afspraak ingepland:</p>
             <div class="stats"><table>
               <tr><td>Klant</td><td>{customerName ?? "Onbekend"}</td></tr>
@@ -512,7 +526,6 @@ public class EmailTemplateService
         ($"Terugbelverzoek: {callerName}", Layout(
             $"{callerName} wil teruggebeld worden.",
             $"""
-            <h2>Terugbelverzoek ontvangen</h2>
             <p>Via uw VoxFlow-assistent is een terugbelverzoek aangemaakt:</p>
             <div class="stats"><table>
               <tr><td>Naam</td><td>{callerName}</td></tr>
@@ -528,7 +541,6 @@ public class EmailTemplateService
         ("Gesprek doorgestuurd naar medewerker", Layout(
             "Een beller is doorgestuurd door uw assistent.",
             $"""
-            <h2>Gesprek doorgestuurd</h2>
             <p>Uw VoxFlow-assistent heeft een gesprek doorgestuurd{(departmentName is { Length: > 0 } ? $" naar de afdeling <strong>{departmentName}</strong>" : " naar een medewerker")}.</p>
             <div class="stats"><table>
               {(callerPhone is { Length: > 0 } ? $"<tr><td>Beller</td><td>{callerPhone}</td></tr>" : "")}
@@ -541,7 +553,6 @@ public class EmailTemplateService
         ("Spoedmelding ontvangen van beller", Layout(
             "Urgente oproep via uw VoxFlow-assistent.",
             $"""
-            <h2>Spoedmelding ontvangen</h2>
             <p>Uw VoxFlow-assistent heeft een urgente oproep ontvangen en de beller doorgestuurd naar een medewerker.</p>
             <div class="stats"><table>
               {(callerPhone is { Length: > 0 } ? $"<tr><td>Beller</td><td>{callerPhone}</td></tr>" : "")}
@@ -549,47 +560,24 @@ public class EmailTemplateService
             {Cta("Bekijk gesprekken", DashboardUrl + "/gesprekken")}
             """));
 
-    // ── #60 · Integratie wachtlijst aanvraag (intern naar admin) ─────────────
-
-    public (string Subject, string Html) IntegrationNotifyAdmin(string companyName, short companyId, string integratieNaam) =>
-        ($"Wachtlijst: {integratieNaam} — {companyName}", Layout(
-            $"{companyName} wil {integratieNaam}.",
-            $"""
-            <h2>Nieuwe wachtlijst-aanvraag</h2>
-            <p><strong>Bedrijf:</strong> {companyName} (ID: {companyId})</p>
-            <p><strong>Integratie:</strong> {integratieNaam}</p>
-            <p>Klik op "Live zetten" in het admin panel zodra de integratie beschikbaar is.</p>
-            {Cta("Ga naar admin panel", "https://voxflow-a9b2ghh9anb6gnfa.westeurope-01.azurewebsites.net/admin")}
-            """));
-
-    // ── #61 · Abonnement verlopen — waarschuwing 5 dagen voor verwijdering ──
+    // ── AVG / data lifecycle ──────────────────────────────────────────────────
 
     public (string Subject, string Html) SubscriptionExpiredWarning(string naam, int daysLeft) =>
         ("Laatste waarschuwing: uw gegevens worden binnenkort verwijderd", Layout(
             $"Uw VoxFlow-gegevens worden over {daysLeft} dag{(daysLeft == 1 ? "" : "en")} verwijderd.",
             $"""
-            <h2>Uw abonnement is verlopen</h2>
             <p>Beste {naam},</p>
             <p>Uw VoxFlow-abonnement is verlopen en de assistent is niet meer actief. U heeft nog toegang tot uw dashboard.</p>
-            <p><strong>Over {daysLeft} dag{(daysLeft == 1 ? "" : "en")} worden al uw gegevens definitief verwijderd</strong> in het kader van de AVG-wetgeving. Dit omvat:</p>
-            <ul>
-              <li>Alle gesprekken en belhistorie</li>
-              <li>Afspraken en afspraaktypen</li>
-              <li>Medewerkers en bedrijfsinstellingen</li>
-              <li>Alle overige bedrijfsgegevens</li>
-            </ul>
+            <p><strong>Over {daysLeft} dag{(daysLeft == 1 ? "" : "en")} worden al uw gegevens definitief verwijderd</strong> in het kader van de AVG-wetgeving. Dit omvat alle gesprekken, afspraken, medewerkers en bedrijfsinstellingen.</p>
             <p>Wilt u uw gegevens behouden? Heractiveer uw abonnement vóór de verwijderdatum.</p>
-            {Cta("Abonnement heractiveren", "https://voxflow.nl/dashboard/instellingen?tab=abo")}
+            {Cta("Abonnement heractiveren", DashboardUrl + "/instellingen?tab=abo")}
             <p style="color:#6b7280;font-size:13px;">Heeft u vragen? Neem contact op via info@voxflow.nl.</p>
             """));
-
-    // ── #62 · Bevestiging gegevensverwijdering (AVG) ─────────────────────────
 
     public (string Subject, string Html) DataDeleted(string naam) =>
         ("Uw VoxFlow-gegevens zijn verwijderd", Layout(
             "Al uw gegevens zijn verwijderd conform de AVG.",
             $"""
-            <h2>Gegevens verwijderd</h2>
             <p>Beste {naam},</p>
             <p>Conform de AVG-wetgeving zijn alle gegevens van uw VoxFlow-account definitief verwijderd.</p>
             <p>Als u in de toekomst opnieuw gebruik wilt maken van VoxFlow, kunt u een nieuw account aanmaken.</p>
