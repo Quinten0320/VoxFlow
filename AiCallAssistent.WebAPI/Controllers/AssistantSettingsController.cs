@@ -100,7 +100,7 @@ public class AssistantSettingsController(AppDbContext db) : DashboardControllerB
         settings.BotActiveHoursEnabled = request.BotActiveHoursEnabled;
         settings.Tone = request.Tone;
         settings.RoutingRules = request.RoutingRules;
-        settings.AutoMessageConfig = request.AutoMessageConfig;
+        if (request.AutoMessageConfig != null) settings.AutoMessageConfig = request.AutoMessageConfig;
         settings.NotificationConfig = request.NotificationConfig;
         settings.AssistantName        = request.AssistantName;
         settings.AutoTimeGreeting     = request.AutoTimeGreeting;
