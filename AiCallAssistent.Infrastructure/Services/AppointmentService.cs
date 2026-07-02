@@ -214,12 +214,17 @@ public class AppointmentService : IAppointmentService
         var bookedSlots = await GetBookedSlotsAsync(companyId, date, ranges);
         _logger.LogInformation("GetAvailability: {BookedCount} booked slot(s) on {Date}", bookedSlots.Count, date);
 
+        var bufferMinutes = await _db.Set<AssistantSettings>()
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => s.BufferMinutes ?? 0)
+            .FirstOrDefaultAsync();
+
         var availableSlots = new List<TimeSlotResponse>();
 
         foreach (var employee in employees)
         {
             var employeeSlots = bookedSlots.Where(a => a.EmployeeId == employee.Id).ToList();
-            var slots = GenerateSlots(date, ranges, employeeSlots, typeConfig.DurationMinutes);
+            var slots = GenerateSlots(date, ranges, employeeSlots, typeConfig.DurationMinutes, bufferMinutes);
 
             availableSlots.AddRange(slots.Select(s => new TimeSlotResponse
             {
@@ -266,6 +271,11 @@ public class AppointmentService : IAppointmentService
         if (employees.Count == 0)
             return new SoonestAvailableResponse { CompanyId = companyId, Type = type, DurationMinutes = typeConfig.DurationMinutes };
 
+        var bufferMinutes = await _db.Set<AssistantSettings>()
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => s.BufferMinutes ?? 0)
+            .FirstOrDefaultAsync();
+
         var nowNl = NlTimeZone.Now;
         var todayNl = DateOnly.FromDateTime(nowNl.DateTime);
 
@@ -283,7 +293,7 @@ public class AppointmentService : IAppointmentService
             foreach (var employee in employees)
             {
                 var employeeSlots = bookedSlots.Where(a => a.EmployeeId == employee.Id).ToList();
-                var slots = GenerateSlots(checkDate, ranges, employeeSlots, typeConfig.DurationMinutes);
+                var slots = GenerateSlots(checkDate, ranges, employeeSlots, typeConfig.DurationMinutes, bufferMinutes);
 
                 var validSlots = dayOffset == 0
                     ? slots.Where(s => s.Start > nowNl).ToList()
@@ -406,9 +416,11 @@ public class AppointmentService : IAppointmentService
         DateOnly date,
         List<(TimeOnly Start, TimeOnly End)> ranges,
         List<BookedSlot> bookedSlots,
-        int durationMinutes)
+        int durationMinutes,
+        int bufferMinutes = 0)
     {
         var slots = new List<(DateTimeOffset Start, DateTimeOffset End)>();
+        var buffer = TimeSpan.FromMinutes(bufferMinutes);
 
         foreach (var range in ranges)
         {
@@ -420,7 +432,8 @@ public class AppointmentService : IAppointmentService
                 var slotEnd = current.AddMinutes(durationMinutes);
                 if (slotEnd > rangeEnd) break;
 
-                var hasConflict = bookedSlots.Any(b => b.StartTime < slotEnd && b.EndTime > current);
+                // A booked appointment blocks [StartTime, EndTime + buffer] to enforce the gap.
+                var hasConflict = bookedSlots.Any(b => b.StartTime < slotEnd && b.EndTime.Add(buffer) > current);
                 if (!hasConflict)
                     slots.Add((current, slotEnd));
 
