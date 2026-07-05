@@ -45,6 +45,16 @@ public class StripeController(
             ? request.FrontendOrigin.TrimEnd('/')
             : $"{Request.Scheme}://{Request.Host}";
 
+        var ownerEmail = await Db.Employees
+            .Where(e => e.CompanyId == companyId && e.IsOwner && e.IsActive && e.Email != null)
+            .Select(e => e.Email)
+            .FirstOrDefaultAsync();
+
+        var existingCustomerId = await Db.CompanyPackages
+            .Where(p => p.CompanyId == companyId && p.StripeCustomerId != null)
+            .Select(p => p.StripeCustomerId)
+            .FirstOrDefaultAsync();
+
         var options = new SessionCreateOptions
         {
             Mode = "subscription",
@@ -73,9 +83,24 @@ public class StripeController(
             CancelUrl  = $"{origin}/onboarding?step=7",
         };
 
-        var service = new SessionService();
-        var session = await service.CreateAsync(options);
+        if (existingCustomerId is { Length: > 0 })
+            options.Customer = existingCustomerId;
+        else if (ownerEmail is { Length: > 0 })
+            options.CustomerEmail = ownerEmail;
 
+        Session session;
+        try
+        {
+            var service = new SessionService();
+            session = await service.CreateAsync(options);
+        }
+        catch (StripeException ex)
+        {
+            logger.LogError(ex, "Stripe checkout session creation failed for company {CompanyId}: {StripeError}", companyId, ex.StripeError?.Message);
+            return StatusCode(502, new { error = "Stripe sessie kon niet worden aangemaakt.", detail = ex.StripeError?.Message });
+        }
+
+        logger.LogInformation("Stripe checkout session created for company {CompanyId}: {SessionId} → {Url}", companyId, session.Id, session.Url);
         return Ok(new { url = session.Url });
     }
 
@@ -284,6 +309,41 @@ public class StripeController(
 
         var effectiveDate = new DateTimeOffset(periodEnd, TimeSpan.Zero);
         return Ok(new { immediate = false, effectiveDate });
+    }
+
+    // ── Cancel Subscription ───────────────────────────────────────────────────
+
+    [HttpPost("cancel")]
+    public async Task<IActionResult> CancelSubscription()
+    {
+        var (companyId, error) = await GetCompanyIdAsync();
+        if (error != null) return error;
+
+        var pkg = await Db.CompanyPackages.FirstOrDefaultAsync(p => p.CompanyId == companyId);
+        if (pkg?.StripeSubscriptionId == null)
+            return BadRequest(new { error = "Geen actief abonnement gevonden." });
+
+        if (pkg.SubscriptionStatus == "canceled")
+            return BadRequest(new { error = "Abonnement is al opgezegd." });
+
+        try
+        {
+            await new SubscriptionService().UpdateAsync(pkg.StripeSubscriptionId, new SubscriptionUpdateOptions
+            {
+                CancelAtPeriodEnd = true,
+            });
+        }
+        catch (StripeException ex)
+        {
+            logger.LogError(ex, "Stripe cancel failed for company {CompanyId}: {StripeError}", companyId, ex.StripeError?.Message);
+            return StatusCode(502, new { error = "Opzeggen mislukt bij Stripe.", detail = ex.StripeError?.Message });
+        }
+
+        pkg.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+
+        logger.LogInformation("Subscription set to cancel at period end for company {CompanyId}", companyId);
+        return Ok(new { cancelAtPeriodEnd = true, currentPeriodEnd = pkg.CurrentPeriodEnd });
     }
 
     // ── Customer Portal ───────────────────────────────────────────────────────
