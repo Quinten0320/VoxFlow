@@ -125,6 +125,22 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
         while (_transcripts.Reader.TryRead(out _)) { }
     }
 
+    // Provider tag used for the uniform [STT] comparison log line (see PublishTranscript).
+    private const string Provider = "scribe";
+
+    /// <summary>
+    /// Single funnel for finalised transcripts: writes to the channel and emits one
+    /// uniform, greppable log line so Flux / Nova-3 / Scribe can be compared on real calls.
+    /// </summary>
+    private void PublishTranscript(string text, double? confidence)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return;
+        _transcripts.Writer.TryWrite(text);
+        _logger.LogInformation("[STT] provider={Provider} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
+            Provider, confidence?.ToString("F2") ?? "n/a", text.Length, text);
+    }
+
     private async Task SendJsonAsync(JsonNode msg, CancellationToken ct)
     {
         var bytes = Encoding.UTF8.GetBytes(msg.ToJsonString());
@@ -248,9 +264,7 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
             _confidenceCount++;
         }
 
-        _transcripts.Writer.TryWrite(text.Trim());
-        _logger.LogInformation("[SCRIBE] committed confidence={Confidence}: \"{Transcript}\"",
-            confidence, text.Trim());
+        PublishTranscript(text, confidence);
     }
 
     public async ValueTask DisposeAsync()

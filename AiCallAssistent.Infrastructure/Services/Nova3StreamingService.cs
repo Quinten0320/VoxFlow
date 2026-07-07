@@ -89,6 +89,22 @@ public sealed class Nova3StreamingService : ISttStreamingService
         while (_transcripts.Reader.TryRead(out _)) { }
     }
 
+    // Provider tag used for the uniform [STT] comparison log line (see PublishTranscript).
+    private const string Provider = "nova3";
+
+    /// <summary>
+    /// Single funnel for finalised transcripts: writes to the channel and emits one
+    /// uniform, greppable log line so Flux / Nova-3 / Scribe can be compared on real calls.
+    /// </summary>
+    private void PublishTranscript(string text, double? confidence)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return;
+        _transcripts.Writer.TryWrite(text);
+        _logger.LogInformation("[STT] provider={Provider} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
+            Provider, confidence?.ToString("F2") ?? "n/a", text.Length, text);
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken ct)
     {
         var buffer = new byte[16 * 1024];
@@ -224,9 +240,8 @@ public sealed class Nova3StreamingService : ISttStreamingService
                     try
                     {
                         await Task.Delay(GraceMs, cts.Token);
-                        _transcripts.Writer.TryWrite(capturedFull);
-                        _logger.LogInformation("[NOVA3] speech_final (low-conf grace elapsed) confidence={C:F2}: \"{T}\"",
-                            capturedConfidence, capturedFull);
+                        _logger.LogDebug("[NOVA3] speech_final low-conf grace elapsed");
+                        PublishTranscript(capturedFull, capturedConfidence);
                     }
                     catch (OperationCanceledException)
                     {
@@ -237,8 +252,7 @@ public sealed class Nova3StreamingService : ISttStreamingService
             }
         }
 
-        _transcripts.Writer.TryWrite(full);
-        _logger.LogInformation("[NOVA3] speech_final confidence={C:F2}: \"{T}\"", confidence, full);
+        PublishTranscript(full, confidence);
     }
 
     private void FlushBuffer(string source)
@@ -249,8 +263,8 @@ public sealed class Nova3StreamingService : ISttStreamingService
 
         if (string.IsNullOrEmpty(full)) return;
 
-        _transcripts.Writer.TryWrite(full);
-        _logger.LogInformation("[NOVA3] {Source} flush: \"{T}\"", source, full);
+        _logger.LogDebug("[NOVA3] flush source={Source}", source);
+        PublishTranscript(full, null);
     }
 
     private void CancelPendingEot()

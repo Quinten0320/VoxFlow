@@ -110,8 +110,15 @@ public static class TwilioStreamEndpoint
             using var cts = new CancellationTokenSource();
             await handler.RunAsync(cts.Token);
 
-            // Persist Deepgram transcription confidence before disposing
+            // Persist STT transcription confidence before disposing
             var avgConfidence = deepgram.AverageConfidence;
+
+            // Per-call summary so Flux / Nova-3 / Scribe can be compared across deployments:
+            // filter logs on "[STT] call summary" (or "[STT] provider=" for per-turn lines).
+            var sttProvider = sp.GetRequiredService<IOptions<DeepgramSettings>>().Value.SttProvider;
+            logger.LogInformation("[STT] call summary provider={Provider} callSid={CallSid} avgConfidence={Avg}",
+                sttProvider, callSid, avgConfidence?.ToString("F3") ?? "n/a");
+
             await deepgram.DisposeAsync();
 
             if (avgConfidence.HasValue)
