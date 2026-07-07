@@ -26,12 +26,6 @@ namespace AiCallAssistent.Infrastructure.Services;
 ///                           barge-in "caller started speaking" signal (SpeechStartedEvents).
 ///   • committed transcript → the finalised utterance handed to Gemini (ReadTranscriptsAsync).
 ///
-/// NOTE: The official realtime WebSocket reference is behind Cloudflare and could not be
-/// fetched at implementation time, so the wire details flagged with "// VERIFY" below
-/// (URL path, config-as-query-params, exact message_type / field names) are built from the
-/// documented API shape and should be confirmed against the live API with a real key. The
-/// receive loop logs and ignores unknown message types, so a wrong guess degrades gracefully
-/// rather than crashing the call.
 /// </summary>
 public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
 {
@@ -73,32 +67,31 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
         // Language hint: empty => auto-detect (multilingual). We deliberately leave this
         // unset by default so the caller can speak any language and still be transcribed;
         // the multilingual model handles Dutch natively and more accurately than Deepgram.
+        // Set ElevenLabs:ScribeLanguage to force a specific language (e.g. "nl").
         var langHint = _settings.ScribeLanguage;
 
-        // VERIFY: exact realtime WS path + whether config is passed as query params or an
-        // initial JSON "session config" message. Query params mirror ElevenLabs' TTS
-        // stream-input endpoint and avoid guessing a config-message schema.
         var url = $"{_settings.ScribeBaseUrl}/v1/speech-to-text/realtime"
             + $"?model_id={Uri.EscapeDataString(_settings.ScribeModel)}"
-            + $"&audio_format=ulaw_8000";
+            + $"&audio_format=ulaw_8000"
+            + $"&commit_strategy=manual";
         if (!string.IsNullOrWhiteSpace(langHint))
             url += $"&language_code={Uri.EscapeDataString(langHint)}";
 
         await _ws.ConnectAsync(new Uri(url), ct);
         _receiveLoop = Task.Run(() => ReceiveLoopAsync(ct), CancellationToken.None);
-        _logger.LogDebug("ElevenLabs Scribe WebSocket connected (language={Language}, requested_hint={Requested})",
-            string.IsNullOrWhiteSpace(langHint) ? "auto" : langHint, language);
+        _logger.LogDebug("ElevenLabs Scribe WebSocket connected (language_hint={LanguageHint})",
+            string.IsNullOrWhiteSpace(langHint) ? "auto" : langHint);
     }
 
     public async ValueTask SendAudioAsync(ReadOnlyMemory<byte> mulawBytes, CancellationToken ct)
     {
         if (_ws?.State != WebSocketState.Open) return;
 
-        // VERIFY: message_type / field names for the audio input message.
         var msg = new JsonObject
         {
             ["message_type"]  = "input_audio_chunk",
             ["audio_base_64"] = Convert.ToBase64String(mulawBytes.Span),
+            ["sample_rate"]   = 8000,
         };
         await SendJsonAsync(msg, ct);
     }
@@ -107,8 +100,7 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
     {
         if (_ws?.State != WebSocketState.Open) return;
 
-        // VERIFY: end-of-audio / flush signal. A commit flushes any buffered audio into a
-        // final committed transcript before the socket closes.
+        // Commit flushes any buffered audio into a final committed_transcript before the socket closes.
         var msg = new JsonObject
         {
             ["message_type"] = "input_audio_chunk",
@@ -200,15 +192,12 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
                     HandlePartial(root!);
                     return;
 
-                // VERIFY: committed/final transcript message_type — handle both likely names.
                 case "committed_transcript":
-                case "final_transcript":
-                case "transcript":
+                case "committed_transcript_with_timestamps":
                     HandleCommitted(root!);
                     return;
 
-                // VERIFY: explicit VAD speech-start event, if the API emits one. Barge-in is
-                // also derived from the first partial (below), so this is belt-and-suspenders.
+                // Belt-and-suspenders: barge-in is also derived from the first partial above.
                 case "speech_started":
                     _utteranceActive = true;
                     _speechStarted.Writer.TryWrite(true);
@@ -216,7 +205,18 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
                     return;
 
                 case "error":
-                    _logger.LogWarning("ElevenLabs Scribe error: {Body}", json);
+                case "auth_error":
+                case "quota_exceeded":
+                case "commit_throttled":
+                case "rate_limited":
+                case "queue_overflow":
+                case "resource_exhausted":
+                case "session_time_limit_exceeded":
+                case "input_error":
+                case "chunk_size_exceeded":
+                case "insufficient_audio_activity":
+                case "transcriber_error":
+                    _logger.LogWarning("ElevenLabs Scribe error [{Type}]: {Body}", type, json);
                     return;
 
                 default:
