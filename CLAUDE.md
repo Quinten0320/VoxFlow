@@ -144,6 +144,16 @@ WhatsApp reuses the same LLM + dispatcher path via `TwilioController.WhatsAppInc
   host — it's rewritten to `wss://` for the stream and used to build webhook callback URLs),
   `Supabase` (`Authority`/`ProjectUrl` for JWT validation), `Cors:AllowedOrigins`, `Stripe`,
   `Gmail`, `Outlook`, `Admin`, `Assistant` (`DefaultCompanyId`, welcome message template).
+- **`Deepgram:SttProvider`** selects the streaming STT implementation at startup:
+  `"flux"` (default) or `"nova3"` (both Deepgram, EU endpoint) or `"scribe"` (ElevenLabs
+  Scribe v2 Realtime — reuses `ElevenLabs:ApiKey`). Scribe's own knobs (`ScribeBaseUrl`,
+  `ScribeModel`, `ScribeLanguage`) live on the `ElevenLabs` section; `ScribeLanguage` empty =
+  multilingual auto-detect. Scribe forwards Twilio μ-law 8 kHz frames untouched (no transcode).
+- **Azure App Service application settings override `appsettings.json` at runtime** (env-var
+  form `Section__Key`, e.g. `Deepgram__SttProvider`). If a key is *not* set in Azure, the
+  `appsettings.json` value applies. Editing `appsettings.json` only takes effect once
+  **deployed** (push to `Master`); an Azure app setting changes behaviour on restart without a
+  redeploy and never modifies the committed file.
 
 ## Database & migrations
 
@@ -175,6 +185,27 @@ dotnet publish AiCallAssistent.WebAPI/AiCallAssistent.WebAPI.csproj -c Release -
 - `AiCallAssistent.WebAPI.http` contains sample requests for manual testing.
 - In Development, HTTPS redirect is disabled and CORS allows any localhost origin.
 
+## Branches, hosting & deployment
+
+- **`Master`** is the production deploy branch. CI (`.github/workflows/master_voxflow.yml`)
+  builds and deploys to the **Azure App Service "VoxFlow"** (West Europe, Linux) on every
+  push. Don't push feature work directly to it.
+- **`Develop`** is kept identical to `Master` (it previously carried an *unrelated* history and
+  was reset to match Master). There is **no separate dev deployment wired up** — only the
+  Master workflow exists. If someone has an old local `Develop`, they must
+  `git fetch && git reset --hard origin/Develop` (the history was rewritten).
+- Prod runs on a **single Basic B1 instance**. Two consequences: a deploy restarts the app and
+  **drops any in-progress call** (prefer deploying off-hours), and there's no autoscale/second
+  instance. Because the app isn't horizontally scalable (in-memory stores, see Gotchas), growth
+  is **vertical** — a larger instance, or Standard for autoscale + deployment slots. Call volume
+  is light: packages cap usage at 500 / 1000 call-minutes per company per month.
+- **Adding a dev/staging environment (cheapest):** create a second Web App assigned to the
+  *existing* B1 App Service plan — multiple apps share one plan at no extra compute cost. It
+  needs its own Azure settings: a separate `Twilio:BaseUrl` (its own host), a separate Twilio
+  number pointed at its `/api/twilio/answer`, and ideally a **separate Supabase project** so
+  test calls don't write to prod data. Move dev onto its own plan once prod serves real
+  customers (so a test call can't starve prod's shared vCPU). Deployment slots need Standard+.
+
 ## Conventions & patterns
 
 - **Clean Architecture boundaries are real.** Domain depends on nothing; Application defines
@@ -189,6 +220,11 @@ dotnet publish AiCallAssistent.WebAPI/AiCallAssistent.WebAPI.csproj -c Release -
   call. Follow this pattern in call-flow code.
 - **Twilio webhooks return HTTP 200 even on internal failure** (Twilio retries non-2xx). TwiML
   is returned as `application/xml`. All caller-supplied text going into TwiML is XML-escaped.
+- **STT provider comparison logging**: every streaming STT service funnels finalized transcripts
+  through a `PublishTranscript` helper that emits a uniform, greppable
+  `[STT] provider=… confidence=… chars=… transcript="…"` line, and `TwilioStreamEndpoint` logs a
+  per-call `[STT] call summary provider=… avgConfidence=…`. Filter logs on `[STT]` to A/B
+  providers on real calls; keep any new STT provider on this convention.
 - **Background side effects** use `IServiceScopeFactory.CreateScope()` + a fresh
   `AppDbContext` (the request-scoped one is disposed). Never capture the scoped DbContext in a
   `Task.Run`.
@@ -208,8 +244,9 @@ dotnet publish AiCallAssistent.WebAPI/AiCallAssistent.WebAPI.csproj -c Release -
   or not the public host, calls silently break. It's also rewritten `https→wss`.
 - **STT provider selection is startup-time**, from `Deepgram:SttProvider`. Switching providers
   requires a restart, not just config reload.
-- **The deploy branch is `Master`** (capitalized). CI (`.github/workflows/master_voxflow.yml`)
-  builds and deploys to Azure on push to `Master`. Do not push feature work directly to it.
+- **The deploy branch is `Master`** (capitalized) — CI deploys to Azure on push; `Develop`
+  mirrors it but has no deploy wired, and the single B1 instance means a deploy drops
+  in-progress calls. See "Branches, hosting & deployment". Do not push feature work to `Master`.
 - Schema changes need a hand-written SQL migration (see Database section) — EF won't generate one.
 
 ## Related docs
