@@ -77,6 +77,22 @@ public sealed class DeepgramStreamingService : ISttStreamingService
         while (_transcripts.Reader.TryRead(out _)) { }
     }
 
+    // Provider tag used for the uniform [STT] comparison log line (see PublishTranscript).
+    private const string Provider = "flux";
+
+    /// <summary>
+    /// Single funnel for finalised transcripts: writes to the channel and emits one
+    /// uniform, greppable log line so Flux / Nova-3 / Scribe can be compared on real calls.
+    /// </summary>
+    private void PublishTranscript(string text, double? confidence)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return;
+        _transcripts.Writer.TryWrite(text);
+        _logger.LogInformation("[STT] provider={Provider} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
+            Provider, confidence?.ToString("F2") ?? "n/a", text.Length, text);
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken ct)
     {
         var buffer = new byte[16 * 1024];
@@ -204,10 +220,8 @@ public sealed class DeepgramStreamingService : ISttStreamingService
                                 try
                                 {
                                     await Task.Delay(EotGraceMs, cts.Token);
-                                    _transcripts.Writer.TryWrite(capturedTranscript);
-                                    _logger.LogInformation(
-                                        "[DEEPGRAM] EndOfTurn (low-conf grace elapsed) confidence={Confidence:F2}: \"{Transcript}\"",
-                                        capturedConfidence, capturedTranscript);
+                                    _logger.LogDebug("[DEEPGRAM] EndOfTurn low-conf grace elapsed");
+                                    PublishTranscript(capturedTranscript, capturedConfidence);
                                 }
                                 catch (OperationCanceledException)
                                 {
@@ -220,18 +234,13 @@ public sealed class DeepgramStreamingService : ISttStreamingService
                         else
                         {
                             // Terminal punctuation → complete thought → fire immediately
-                            _transcripts.Writer.TryWrite(capturedTranscript);
-                            _logger.LogInformation(
-                                "[DEEPGRAM] EndOfTurn (low-conf, complete) confidence={Confidence:F2}: \"{Transcript}\"",
-                                capturedConfidence, capturedTranscript);
+                            PublishTranscript(capturedTranscript, capturedConfidence);
                         }
                     }
                     else
                     {
                         // High confidence: fire immediately
-                        _transcripts.Writer.TryWrite(transcript.Trim());
-                        _logger.LogInformation("[DEEPGRAM] EndOfTurn confidence={Confidence:F2}: \"{Transcript}\"",
-                            eotConfidence, transcript);
+                        PublishTranscript(transcript, eotConfidence);
                     }
                 }
                 else
