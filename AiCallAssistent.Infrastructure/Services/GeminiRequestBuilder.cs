@@ -85,18 +85,21 @@ internal static class GeminiRequestBuilder
               - Noem tijden ALTIJD in gesproken taal. Gebruik het veld "spoken_time" uit de tool-respons — dat bevat de juiste gesproken tijd. Zeg dus "om kwart over 2 's middags", niet "14:15". Gebruik NOOIT digitale notaties zoals "09:00", "14:00" of "07:20".
               """;
 
+        var urgentAfterHoursException = context.UrgentWhatsappAfterHours
+            ? "\n                UITZONDERING 2: Geeft de beller aan dat het spoed of dringend is? Verbind dan ALTIJD direct door via transfer_to_human, ook buiten kantooruren."
+            : string.Empty;
         var afterHoursInstructions = config?.AfterHoursMode switch
         {
             AiCallAssistent.Application.Constants.AfterHoursMode.CallbackOnly or
             AiCallAssistent.Application.Constants.AfterHoursMode.TryHuman =>
-                """
+                $"""
 
                 BUITEN OPENINGSTIJDEN — BELANGRIJK:
                 Het bedrijf is op dit moment GESLOTEN. Boek GEEN afspraken.
                 Jouw enige taak is het inplannen van een terugbelverzoek via schedule_callback.
                 Roep altijd eerst get_opening_hours aan zodat je de beller kunt vertellen wanneer we beschikbaar zijn.
                 Bevestig het terugbelvenster met de beller voordat je schedule_callback aanroept.
-                UITZONDERING: Als het gevraagde afspraaktype urgentAlwaysForward=true heeft of een eigen afterHoursMode heeft, gebruik dan die instelling in plaats van deze globale regel.
+                UITZONDERING 1: Als het gevraagde afspraaktype urgentAlwaysForward=true heeft of een eigen afterHoursMode heeft, gebruik dan die instelling in plaats van deze globale regel.{urgentAfterHoursException}
                 """,
             AiCallAssistent.Application.Constants.AfterHoursMode.FullService =>
                 """
@@ -252,6 +255,8 @@ internal static class GeminiRequestBuilder
                     "\n- Vraagt de beller expliciet om een medewerker of persoon? Roep dan onmiddellijk transfer_to_human aan.",
                 "Alleen bij spoed" =>
                     "\n- Verbind ALLEEN door (via transfer_to_human) als de beller aangeeft dat het spoed is of dringend (bijv. \"spoed\", \"dringend\", \"noodgeval\"). Bij gewone vragen NIET doorverbinden.",
+                "Overig" =>
+                    "\n- Als de situatie daarom vraagt of de beller heeft een specifieke reden: verbind door via transfer_to_human naar eigen inzicht.",
                 _ => null
             };
             if (instruction is not null)

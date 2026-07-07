@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace AiCallAssistent.Infrastructure.Services;
 
-public class ElevenLabsStreamingService : IElevenLabsStreamingService
+public class ElevenLabsStreamingService : ITtsStreamingService
 {
     private readonly HttpClient _http;
     private readonly ElevenLabsSettings _settings;

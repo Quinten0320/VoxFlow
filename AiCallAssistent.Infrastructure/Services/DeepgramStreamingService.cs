@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace AiCallAssistent.Infrastructure.Services;
 
-public sealed class DeepgramStreamingService : IDeepgramStreamingService
+public sealed class DeepgramStreamingService : ISttStreamingService
 {
     private readonly DeepgramSettings _settings;
     private readonly ILogger<DeepgramStreamingService> _logger;

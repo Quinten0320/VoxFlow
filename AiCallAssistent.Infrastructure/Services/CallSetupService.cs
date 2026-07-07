@@ -161,30 +161,43 @@ public class CallSetupService(
                     var nonAfterHours = new List<string>();
                     foreach (var entry in entries)
                     {
-                        // Support both old plain-string format ["0612345678"] and new object format [{number,when,department}]
-                        string? when   = entry.ValueKind == System.Text.Json.JsonValueKind.String
-                            ? null
-                            : entry.TryGetProperty("when", out var w) ? w.GetString() : null;
+                        // Support both old plain-string format ["0612345678"] and new object format [{number,when,whens,department}]
                         string? number = entry.ValueKind == System.Text.Json.JsonValueKind.String
                             ? entry.GetString()
                             : entry.TryGetProperty("number", out var n) ? n.GetString() : null;
-                        if (when?.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase) == true)
+
+                        // Collect all conditions: single `when` + multi-reason `whens` array
+                        var entryWhens = new List<string>();
+                        if (entry.ValueKind != System.Text.Json.JsonValueKind.String)
                         {
-                            if (string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
+                            if (entry.TryGetProperty("when", out var w) && w.GetString() is { Length: > 0 } wStr)
+                                entryWhens.Add(wStr);
+                            if (entry.TryGetProperty("whens", out var wsEl) && wsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
                             {
-                                escalationNumber = number;
-                                if (string.IsNullOrEmpty(afterHoursMode))
-                                    afterHoursMode = Application.Constants.AfterHoursMode.TryHuman;
+                                foreach (var wEl in wsEl.EnumerateArray())
+                                {
+                                    if (wEl.GetString() is { Length: > 0 } ws && !entryWhens.Contains(ws, StringComparer.OrdinalIgnoreCase))
+                                        entryWhens.Add(ws);
+                                }
                             }
                         }
-                        else if (when is { Length: > 0 })
+
+                        bool hasAfterHours = entryWhens.Any(w => w.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase));
+                        if (hasAfterHours && string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
                         {
-                            // Use number as escalation fallback if no other escalation is configured
+                            escalationNumber = number;
+                            if (string.IsNullOrEmpty(afterHoursMode))
+                                afterHoursMode = Application.Constants.AfterHoursMode.TryHuman;
+                        }
+
+                        var otherWhens = entryWhens.Where(w => !w.Equals("Buiten kantooruren", StringComparison.OrdinalIgnoreCase)).ToList();
+                        if (otherWhens.Count > 0)
+                        {
                             if (string.IsNullOrEmpty(escalationNumber) && number is { Length: > 0 })
                                 escalationNumber = number;
-                            nonAfterHours.Add(when);
+                            nonAfterHours.AddRange(otherWhens);
                         }
-                        else if (number is { Length: > 0 })
+                        else if (entryWhens.Count == 0 && number is { Length: > 0 })
                         {
                             // Old plain-string format: no "when" condition — treat as general escalation number
                             if (string.IsNullOrEmpty(escalationNumber))
@@ -313,6 +326,8 @@ public class CallSetupService(
         string[]? notificationTopics = null;
         bool notifyOutsideHours = false;
         bool urgentWhatsappAfterHours = true;
+        bool notifyViaWhatsApp = false;
+        bool notifyViaEmail = true;
         if (assistantSettings?.NotificationConfig is { Length: > 0 } ncJson)
         {
             try
@@ -329,6 +344,11 @@ public class CallSetupService(
                     urgentWhatsappAfterHours = uwah.GetBoolean();
                 else if (nc.TryGetProperty("urgentAfterHours", out var uah))
                     urgentWhatsappAfterHours = uah.GetBoolean();
+                if (nc.TryGetProperty("channels", out var chEl) && chEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    if (chEl.TryGetProperty("whatsapp", out var wa)) notifyViaWhatsApp = wa.GetBoolean();
+                    if (chEl.TryGetProperty("email", out var em)) notifyViaEmail = em.GetBoolean();
+                }
             }
             catch { /* malformed JSON — ignore */ }
         }
@@ -356,7 +376,9 @@ public class CallSetupService(
             OwnerEmail:              ownerEmail,
             NotificationTopics:      notificationTopics,
             NotifyOutsideHours:      notifyOutsideHours,
-            UrgentWhatsappAfterHours: urgentWhatsappAfterHours);
+            UrgentWhatsappAfterHours: urgentWhatsappAfterHours,
+            NotifyViaWhatsApp:       notifyViaWhatsApp,
+            NotifyViaEmail:          notifyViaEmail);
     }
 
     public async Task<CallRecordingContext> LoadRecordingContextAsync(short companyId, string calledNumber)

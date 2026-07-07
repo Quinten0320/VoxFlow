@@ -2,7 +2,7 @@ using System.Threading.Channels;
 
 namespace AiCallAssistent.Application.Services;
 
-public interface IDeepgramStreamingService : IAsyncDisposable
+public interface ISttStreamingService : IAsyncDisposable
 {
     Task ConnectAsync(string language, CancellationToken ct);
     ValueTask SendAudioAsync(ReadOnlyMemory<byte> mulawBytes, CancellationToken ct);

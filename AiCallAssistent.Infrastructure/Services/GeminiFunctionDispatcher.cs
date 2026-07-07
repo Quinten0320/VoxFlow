@@ -450,7 +450,6 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
         bool isUrgent,
         Func<(string Subject, string Html)> buildEmail)
     {
-        if (string.IsNullOrEmpty(ctx.OwnerEmail)) return;
         if (ctx.NotificationTopics is not { Length: > 0 } topics) return;
         if (!topics.Contains(topic, StringComparer.OrdinalIgnoreCase)) return;
 
@@ -460,12 +459,15 @@ public class GeminiFunctionDispatcher : IGeminiFunctionDispatcher
 
         if (!isOpen && !ctx.NotifyOutsideHours && !(isUrgent && ctx.UrgentWhatsappAfterHours)) return;
 
-        try
+        if (ctx.NotifyViaEmail && !string.IsNullOrEmpty(ctx.OwnerEmail))
         {
-            var (subject, html) = buildEmail();
-            await emailSender.SendNowAsync(ctx.CompanyId, ctx.OwnerEmail, ctx.CompanyName ?? "Bedrijf", emailType, subject, html);
+            try
+            {
+                var (subject, html) = buildEmail();
+                await emailSender.SendNowAsync(ctx.CompanyId, ctx.OwnerEmail, ctx.CompanyName ?? "Bedrijf", emailType, subject, html);
+            }
+            catch { /* notification failure must never break the call */ }
         }
-        catch { /* notification failure must never break the call */ }
     }
 
     // ── Shared helpers ───────────────────────────────────────────────────────

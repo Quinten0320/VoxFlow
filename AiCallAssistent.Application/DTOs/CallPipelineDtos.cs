@@ -47,7 +47,9 @@ public record CallDispatchContext(
     string? OwnerEmail = null,
     string[]? NotificationTopics = null,
     bool NotifyOutsideHours = false,
-    bool UrgentWhatsappAfterHours = true);
+    bool UrgentWhatsappAfterHours = true,
+    bool NotifyViaWhatsApp = false,
+    bool NotifyViaEmail = true);
 
 /// <summary>
 /// Company-specific settings loaded once per call from assistant_settings.

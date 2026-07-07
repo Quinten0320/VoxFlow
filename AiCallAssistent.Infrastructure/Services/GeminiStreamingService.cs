@@ -14,7 +14,7 @@ using Microsoft.Extensions.Options;
 
 namespace AiCallAssistent.Infrastructure.Services;
 
-public class GeminiStreamingService : IGeminiStreamingService
+public class GeminiStreamingService : ILlmStreamingService
 {
     private readonly HttpClient _http;
     private readonly IGeminiFunctionDispatcher _dispatcher;
@@ -46,7 +46,7 @@ public class GeminiStreamingService : IGeminiStreamingService
         _logger = logger;
     }
 
-    public async Task<GeminiStreamResult> RunConversationStreamingAsync(
+    public async Task<LlmStreamResult> RunConversationStreamingAsync(
         CallDispatchContext context,
         string userMessage,
         string conversationId,
@@ -79,7 +79,7 @@ public class GeminiStreamingService : IGeminiStreamingService
                 contents.Add(GeminiRequestBuilder.ModelTextTurn(batchText));
                 _conversations.Save(conversationId, contents);
                 _logger.LogDebug("Gemini batch text for {ConversationId}: {Chars} chars", conversationId, batchText.Length);
-                return new GeminiStreamResult(true, null, YieldTextAsync(batchText, ct), pendingEscalation, pendingFallback, pendingAutoTransfer);
+                return new LlmStreamResult(true, null, YieldTextAsync(batchText, ct), pendingEscalation, pendingFallback, pendingAutoTransfer);
             }
 
             if (part["functionCall"] is JsonObject functionCall)
@@ -304,7 +304,7 @@ public class GeminiStreamingService : IGeminiStreamingService
         await Task.CompletedTask;
     }
 
-    private static GeminiStreamResult ErrorResult(string error) =>
+    private static LlmStreamResult ErrorResult(string error) =>
         new(false, error, AsyncEnumerable.Empty<string>(), null, null, null);
 
     private record GeminiBatchResult(bool Success, string? Error, JsonNode? Part)

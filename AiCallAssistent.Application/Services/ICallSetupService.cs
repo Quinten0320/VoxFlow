@@ -38,7 +38,9 @@ public record CallSetupData(
     string? OwnerEmail = null,
     string[]? NotificationTopics = null,
     bool NotifyOutsideHours = false,
-    bool UrgentWhatsappAfterHours = true);
+    bool UrgentWhatsappAfterHours = true,
+    bool NotifyViaWhatsApp = false,
+    bool NotifyViaEmail = true);
 
 /// <summary>All data required to process a recording turn — loaded once at the top of Recording().</summary>
 public record CallRecordingContext(

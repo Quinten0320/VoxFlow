@@ -106,9 +106,13 @@ public static class DependencyInjection
 
         services.AddSingleton<IAudioStore, InMemoryAudioStore>();
 
-        services.AddTransient<IDeepgramStreamingService, DeepgramStreamingService>();
-        services.AddHttpClient<IElevenLabsStreamingService, ElevenLabsStreamingService>();
-        services.AddHttpClient<IGeminiStreamingService, GeminiStreamingService>();
+        var sttProvider = configuration.GetSection("Deepgram")["SttProvider"] ?? "flux";
+        if (sttProvider.Equals("nova3", StringComparison.OrdinalIgnoreCase))
+            services.AddTransient<ISttStreamingService, Nova3StreamingService>();
+        else
+            services.AddTransient<ISttStreamingService, DeepgramStreamingService>();
+        services.AddHttpClient<ITtsStreamingService, ElevenLabsStreamingService>();
+        services.AddHttpClient<ILlmStreamingService, GeminiStreamingService>();
 
         return services;
     }

@@ -2,14 +2,14 @@ using AiCallAssistent.Application.DTOs;
 
 namespace AiCallAssistent.Application.Services;
 
-public interface IGeminiStreamingService
+public interface ILlmStreamingService
 {
     /// <summary>
     /// Runs function-call iterations in batch mode, then streams the final text response via SSE.
-    /// The caller must fully consume <see cref="GeminiStreamResult.TextStream"/> for the
+    /// The caller must fully consume <see cref="LlmStreamResult.TextStream"/> for the
     /// conversation turn to be saved.
     /// </summary>
-    Task<GeminiStreamResult> RunConversationStreamingAsync(
+    Task<LlmStreamResult> RunConversationStreamingAsync(
         CallDispatchContext context,
         string userMessage,
         string conversationId,
@@ -18,7 +18,7 @@ public interface IGeminiStreamingService
 
 }
 
-public record GeminiStreamResult(
+public record LlmStreamResult(
     bool Success,
     string? Error,
     IAsyncEnumerable<string> TextStream,

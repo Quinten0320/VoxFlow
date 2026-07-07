@@ -21,9 +21,9 @@ public sealed class CallStreamHandler
     private readonly string _callSid;
     private readonly string _calledNumber;
     private readonly string _callerNumber;
-    private readonly IDeepgramStreamingService _deepgram;
-    private readonly IGeminiStreamingService _gemini;
-    private readonly IElevenLabsStreamingService _elevenlabs;
+    private readonly ISttStreamingService _deepgram;
+    private readonly ILlmStreamingService _gemini;
+    private readonly ITtsStreamingService _elevenlabs;
     private readonly TwilioSettings _twilio;
     private readonly IMemoryCache _cache;
     private readonly ILogger<CallStreamHandler> _logger;
@@ -62,9 +62,9 @@ public sealed class CallStreamHandler
         string callSid,
         string calledNumber,
         string callerNumber,
-        IDeepgramStreamingService deepgram,
-        IGeminiStreamingService gemini,
-        IElevenLabsStreamingService elevenlabs,
+        ISttStreamingService deepgram,
+        ILlmStreamingService gemini,
+        ITtsStreamingService elevenlabs,
         TwilioSettings twilioSettings,
         IMemoryCache cache,
         ILogger<CallStreamHandler> logger,
@@ -95,7 +95,9 @@ public sealed class CallStreamHandler
             setup.OwnerEmail,
             setup.NotificationTopics,
             setup.NotifyOutsideHours,
-            setup.UrgentWhatsappAfterHours);
+            setup.UrgentWhatsappAfterHours,
+            setup.NotifyViaWhatsApp,
+            setup.NotifyViaEmail);
 
         _callConfig = new CompanyCallConfig(
             SystemPrompt:         setup.SystemPrompt,
@@ -367,7 +369,7 @@ public sealed class CallStreamHandler
 
     // ── Response streaming ───────────────────────────────────────────────────
 
-    private async Task<bool> StreamResponseAsync(GeminiStreamResult result, CancellationToken ct)
+    private async Task<bool> StreamResponseAsync(LlmStreamResult result, CancellationToken ct)
     {
         var sentenceBuffer = new StringBuilder();
         var interrupted = false;

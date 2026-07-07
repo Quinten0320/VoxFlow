@@ -95,9 +95,9 @@ public static class TwilioStreamEndpoint
             if (transferNoAnswer)
                 setup = setup with { WelcomeText = "De lijn was helaas bezet of er werd niet opgenomen. Ik kan u helpen een terugbelverzoek in te plannen, zodat u zo snel mogelijk wordt teruggebeld." };
 
-            var deepgram      = sp.GetRequiredService<IDeepgramStreamingService>();
-            var elevenlabs    = sp.GetRequiredService<IElevenLabsStreamingService>();
-            var gemini        = sp.GetRequiredService<IGeminiStreamingService>();
+            var deepgram      = sp.GetRequiredService<ISttStreamingService>();
+            var elevenlabs    = sp.GetRequiredService<ITtsStreamingService>();
+            var gemini        = sp.GetRequiredService<ILlmStreamingService>();
             var twilioSettings = sp.GetRequiredService<IOptions<TwilioSettings>>().Value;
             var cache         = sp.GetRequiredService<IMemoryCache>();
 
