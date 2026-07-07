@@ -78,7 +78,8 @@ DI is organized as extension methods in `Infrastructure/DependencyInjection.cs`,
   function dispatcher, call setup, and the streaming interfaces
   (`ISttStreamingService`, `ITtsStreamingService`, `ILlmStreamingService`). Note the
   **STT provider is chosen at startup** from `Deepgram:SttProvider` (`"flux"` →
-  `DeepgramStreamingService`, `"nova3"` → `Nova3StreamingService`).
+  `DeepgramStreamingService`, `"nova3"` → `Nova3StreamingService`, `"scribe"` →
+  `ElevenLabsScribeStreamingService`, which reuses the `ElevenLabs` API key).
 - `AddBackgroundServices` — hosted services: `AppointmentNotificationService` (reminders),
   `DataRetentionService` (GDPR purge).
 - `AddEmailInfrastructure` — Gmail SMTP sender, template service, and the

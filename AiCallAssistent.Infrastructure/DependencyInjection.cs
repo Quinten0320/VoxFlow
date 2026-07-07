@@ -107,7 +107,10 @@ public static class DependencyInjection
         services.AddSingleton<IAudioStore, InMemoryAudioStore>();
 
         var sttProvider = configuration.GetSection("Deepgram")["SttProvider"] ?? "flux";
-        if (sttProvider.Equals("nova3", StringComparison.OrdinalIgnoreCase))
+        if (sttProvider.Equals("scribe", StringComparison.OrdinalIgnoreCase))
+            // ElevenLabs Scribe v2 Realtime — reads its API key from the ElevenLabs section.
+            services.AddTransient<ISttStreamingService, ElevenLabsScribeStreamingService>();
+        else if (sttProvider.Equals("nova3", StringComparison.OrdinalIgnoreCase))
             services.AddTransient<ISttStreamingService, Nova3StreamingService>();
         else
             services.AddTransient<ISttStreamingService, DeepgramStreamingService>();
