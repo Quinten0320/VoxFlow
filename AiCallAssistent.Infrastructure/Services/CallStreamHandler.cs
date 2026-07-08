@@ -43,6 +43,11 @@ public sealed class CallStreamHandler
     // Set to true before RunConversationStreamingAsync, cleared just after _isBotSpeaking=true.
     private volatile bool _suppressBargeIn;
 
+    // After lifting _suppressBargeIn, ignore SpeechStarted events until this timestamp.
+    // Prevents echo of the bot's own audio (picked up by the caller's mic) from triggering
+    // a false barge-in in the first few hundred ms of playback.
+    private DateTimeOffset _bargeInGraceUntil;
+
     // Cancelled by MonitorSpeechStartedAsync when a real barge-in fires.
     // Passed (via linked CTS) to ElevenLabs so audio streaming stops immediately.
     private CancellationTokenSource _playbackCts = new();
@@ -246,10 +251,12 @@ public sealed class CallStreamHandler
         {
             await foreach (var _ in _deepgram.SpeechStartedEvents.ReadAllAsync(ct))
             {
-                if (_suppressBargeIn || !_isBotSpeaking)
+                if (_suppressBargeIn || !_isBotSpeaking || DateTimeOffset.UtcNow < _bargeInGraceUntil)
                 {
-                    _logger.LogDebug("SpeechStarted ignored (suppress={Suppress} speaking={Speaking}) for {CallSid}",
-                        _suppressBargeIn, _isBotSpeaking, _callSid);
+                    _logger.LogDebug("SpeechStarted ignored (suppress={Suppress} speaking={Speaking} graceMs={Grace}) for {CallSid}",
+                        _suppressBargeIn, _isBotSpeaking,
+                        (int)Math.Max(0, (_bargeInGraceUntil - DateTimeOffset.UtcNow).TotalMilliseconds),
+                        _callSid);
                     continue;
                 }
 
@@ -301,6 +308,9 @@ public sealed class CallStreamHandler
                 // processing. They belong to the caller's completed utterance and must not fire
                 // as a barge-in the moment suppress is lifted.
                 while (_deepgram.SpeechStartedEvents.TryRead(out _)) { }
+                // 500 ms grace window: echo of the bot's own audio can trigger a SpeechStarted
+                // on the caller's line within the first few hundred ms of playback.
+                _bargeInGraceUntil = DateTimeOffset.UtcNow.AddMilliseconds(500);
                 _suppressBargeIn = false;
                 _logger.LogInformation("[BARGEIN] isBotSpeaking=true, suppressBargeIn=false (playback start) for {CallSid}", _callSid);
 
