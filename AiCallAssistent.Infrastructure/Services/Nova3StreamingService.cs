@@ -57,7 +57,8 @@ public sealed class Nova3StreamingService : ISttStreamingService
             + $"&interim_results=true"
             + $"&vad_events=true"
             + $"&punctuate=true"
-            + $"&smart_format=true";
+            + $"&smart_format=true"
+            + $"&endpointing=1200";
 
         _logger.LogInformation("[NOVA3] Connecting to: {Url}", url);
         try
