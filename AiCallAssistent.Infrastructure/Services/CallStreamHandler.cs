@@ -297,6 +297,10 @@ public sealed class CallStreamHandler
                 // Set _isBotSpeaking BEFORE clearing _suppressBargeIn so MonitorSpeechStartedAsync
                 // always sees a consistent pair (volatile ordering guarantee).
                 _isBotSpeaking = true;
+                // Drain any SpeechStarted events that accumulated during Gemini/function-call
+                // processing. They belong to the caller's completed utterance and must not fire
+                // as a barge-in the moment suppress is lifted.
+                while (_deepgram.SpeechStartedEvents.TryRead(out _)) { }
                 _suppressBargeIn = false;
                 _logger.LogInformation("[BARGEIN] isBotSpeaking=true, suppressBargeIn=false (playback start) for {CallSid}", _callSid);
 
