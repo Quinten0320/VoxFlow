@@ -56,7 +56,6 @@ public sealed class Nova3StreamingService : ISttStreamingService
             + $"&sample_rate=8000"
             + $"&interim_results=true"
             + $"&vad_events=true"
-            + $"&utterance_end_ms=800"
             + $"&punctuate=true"
             + $"&smart_format=true";
 
