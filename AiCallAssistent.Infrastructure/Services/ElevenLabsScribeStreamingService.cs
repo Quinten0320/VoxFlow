@@ -117,7 +117,7 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
         while (_transcripts.Reader.TryRead(out _)) { }
     }
 
-    // Provider tag used for the uniform [STT] comparison log line (see PublishTranscript).
+    // Provider/model tags used for the uniform [STT] comparison log line (see PublishTranscript).
     private const string Provider = "scribe";
 
     /// <summary>
@@ -129,8 +129,8 @@ public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
         text = text.Trim();
         if (text.Length == 0) return;
         _transcripts.Writer.TryWrite(text);
-        _logger.LogInformation("[STT] provider={Provider} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
-            Provider, confidence?.ToString("F2") ?? "n/a", text.Length, text);
+        _logger.LogInformation("[STT] provider={Provider} model={Model} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
+            Provider, _settings.ScribeModel, confidence?.ToString("F2") ?? "n/a", text.Length, text);
     }
 
     private async Task SendJsonAsync(JsonNode msg, CancellationToken ct)

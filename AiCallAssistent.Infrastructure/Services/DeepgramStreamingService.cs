@@ -77,8 +77,9 @@ public sealed class DeepgramStreamingService : ISttStreamingService
         while (_transcripts.Reader.TryRead(out _)) { }
     }
 
-    // Provider tag used for the uniform [STT] comparison log line (see PublishTranscript).
+    // Provider/model tags used for the uniform [STT] comparison log line (see PublishTranscript).
     private const string Provider = "flux";
+    private const string Model    = "flux-general-multi";
 
     /// <summary>
     /// Single funnel for finalised transcripts: writes to the channel and emits one
@@ -89,8 +90,8 @@ public sealed class DeepgramStreamingService : ISttStreamingService
         text = text.Trim();
         if (text.Length == 0) return;
         _transcripts.Writer.TryWrite(text);
-        _logger.LogInformation("[STT] provider={Provider} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
-            Provider, confidence?.ToString("F2") ?? "n/a", text.Length, text);
+        _logger.LogInformation("[STT] provider={Provider} model={Model} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
+            Provider, Model, confidence?.ToString("F2") ?? "n/a", text.Length, text);
     }
 
     private async Task ReceiveLoopAsync(CancellationToken ct)

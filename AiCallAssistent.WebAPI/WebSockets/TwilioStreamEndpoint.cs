@@ -115,9 +115,17 @@ public static class TwilioStreamEndpoint
 
             // Per-call summary so Flux / Nova-3 / Scribe can be compared across deployments:
             // filter logs on "[STT] call summary" (or "[STT] provider=" for per-turn lines).
-            var sttProvider = sp.GetRequiredService<IOptions<DeepgramSettings>>().Value.SttProvider;
-            logger.LogInformation("[STT] call summary provider={Provider} callSid={CallSid} avgConfidence={Avg}",
-                sttProvider, callSid, avgConfidence?.ToString("F3") ?? "n/a");
+            var deepgramSettings  = sp.GetRequiredService<IOptions<DeepgramSettings>>().Value;
+            var elevenLabsSettings = sp.GetRequiredService<IOptions<ElevenLabsSettings>>().Value;
+            var sttProvider = deepgramSettings.SttProvider;
+            var sttModel = sttProvider.ToLowerInvariant() switch
+            {
+                "nova3"  => "nova-3",
+                "scribe" => elevenLabsSettings.ScribeModel,
+                _        => "flux-general-multi",
+            };
+            logger.LogInformation("[STT] call summary provider={Provider} model={Model} callSid={CallSid} avgConfidence={Avg}",
+                sttProvider, sttModel, callSid, avgConfidence?.ToString("F3") ?? "n/a");
 
             await deepgram.DisposeAsync();
 
