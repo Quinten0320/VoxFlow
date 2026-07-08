@@ -52,7 +52,7 @@ public sealed class Nova3StreamingService : ISttStreamingService
         var url = $"{_settings.BaseUrl}/v1/listen"
             + $"?encoding=mulaw&sample_rate=8000"
             + $"&model=nova-3"
-            + $"&detect_language=true"
+            + $"&language=multi"
             + $"&punctuate=true"
             + $"&smart_format=true"
             + $"&interim_results=true"
