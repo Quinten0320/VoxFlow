@@ -1,0 +1,3 @@
+# When merging Develop → Master, keep Master's version of the dev-only workflow.
+# This prevents the Develop CI/CD workflow from leaking into the production branch.
+.github/workflows/develop_voxflow-dev.yml merge=ours
