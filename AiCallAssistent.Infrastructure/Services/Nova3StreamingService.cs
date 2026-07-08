@@ -60,9 +60,19 @@ public sealed class Nova3StreamingService : ISttStreamingService
             + $"&vad_events=true"
             + $"&no_delay=true";
 
-        await _ws.ConnectAsync(new Uri(url), ct);
+        _logger.LogInformation("[NOVA3] Connecting to: {Url}", url);
+        try
+        {
+            await _ws.ConnectAsync(new Uri(url), ct);
+        }
+        catch (WebSocketException ex)
+        {
+            _logger.LogError(ex, "[NOVA3] Handshake failed (errorCode={Code}). URL was: {Url}",
+                ex.WebSocketErrorCode, url);
+            throw;
+        }
         _receiveLoop = Task.Run(() => ReceiveLoopAsync(ct), CancellationToken.None);
-        _logger.LogDebug("Deepgram Nova-3 WebSocket connected");
+        _logger.LogInformation("[NOVA3] Connected successfully");
     }
 
     public async ValueTask SendAudioAsync(ReadOnlyMemory<byte> mulawBytes, CancellationToken ct)
