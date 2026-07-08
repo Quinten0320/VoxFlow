@@ -1,0 +1,3 @@
+# This file is intentionally empty on Master.
+# The actual dev workflow lives on the Develop branch only.
+# .gitattributes keeps Master's version on every merge (merge=ours).
