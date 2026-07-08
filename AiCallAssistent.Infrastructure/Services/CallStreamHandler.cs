@@ -445,8 +445,15 @@ public sealed class CallStreamHandler
         }
 
         if (elChunks == 0)
+        {
+            if (_playbackCts.IsCancellationRequested)
+            {
+                _logger.LogDebug("[SENTENCE] Exit=barge-in(swallowed) for {CallSid}", _callSid);
+                return true;
+            }
             _logger.LogWarning("ElevenLabs returned 0 audio chunks for {CallSid} — possible API error or silent fail",
                 _callSid);
+        }
         else
             _logger.LogInformation("[SENTENCE] Exit=natural after {Chunks} EL chunks for {CallSid}", elChunks, _callSid);
 

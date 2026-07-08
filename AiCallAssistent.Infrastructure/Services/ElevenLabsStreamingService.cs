@@ -58,6 +58,10 @@ public class ElevenLabsStreamingService : ITtsStreamingService
         {
             response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         }
+        catch (OperationCanceledException)
+        {
+            throw; // barge-in / intentional cancel — let StreamSentenceAsync detect it
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "ElevenLabs streaming request failed");
