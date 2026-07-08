@@ -50,14 +50,11 @@ public sealed class Nova3StreamingService : ISttStreamingService
         _ws.Options.SetRequestHeader("Authorization", $"Token {_settings.ApiKey}");
 
         var url = $"{_settings.BaseUrl}/v1/listen"
-            + $"?encoding=mulaw&sample_rate=8000"
-            + $"&model=nova-3"
+            + $"?model=nova-3"
             + $"&language=multi"
-            + $"&punctuate=true"
-            + $"&smart_format=true"
-            + $"&interim_results=true"
-            + $"&utterance_end_ms=800"
-            + $"&vad_events=true";
+            + $"&encoding=mulaw"
+            + $"&sample_rate=8000"
+            + $"&interim_results=true";
 
         _logger.LogInformation("[NOVA3] Connecting to: {Url}", url);
         try
