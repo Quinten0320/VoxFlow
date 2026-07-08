@@ -1,0 +1,289 @@
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json.Nodes;
+using System.Threading.Channels;
+using AiCallAssistent.Application.Configuration;
+using AiCallAssistent.Application.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace AiCallAssistent.Infrastructure.Services;
+
+/// <summary>
+/// ElevenLabs Scribe v2 Realtime implementation of <see cref="ISttStreamingService"/>.
+/// Selected at startup when <c>Deepgram:SttProvider = "scribe"</c>.
+///
+/// Chosen over Deepgram for stronger Dutch accuracy and multilingual auto-detection
+/// (the model covers ~90 languages, so it satisfies "Dutch-first but must still detect
+/// other languages" by leaving the language unset — see <see cref="ElevenLabsSettings.ScribeLanguage"/>).
+///
+/// Twilio Media Streams deliver G.711 μ-law at 8 kHz; Scribe accepts μ-law natively, so
+/// each 20 ms / 160-byte frame is forwarded untouched (base64 in a JSON message) — no
+/// transcode, keeping the barge-in path low-latency, mirroring the Deepgram services.
+///
+/// Turn model mapping onto the interface:
+///   • partial_transcript  → interim; the first non-empty partial of a turn is the
+///                           barge-in "caller started speaking" signal (SpeechStartedEvents).
+///   • committed transcript → the finalised utterance handed to Gemini (ReadTranscriptsAsync).
+///
+/// </summary>
+public sealed class ElevenLabsScribeStreamingService : ISttStreamingService
+{
+    private readonly ElevenLabsSettings _settings;
+    private readonly ILogger<ElevenLabsScribeStreamingService> _logger;
+
+    private readonly Channel<string> _transcripts =
+        Channel.CreateBounded<string>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest });
+
+    private readonly Channel<bool> _speechStarted =
+        Channel.CreateBounded<bool>(new BoundedChannelOptions(4) { FullMode = BoundedChannelFullMode.DropOldest });
+
+    private ClientWebSocket? _ws;
+    private Task? _receiveLoop;
+
+    // True while we are inside a caller utterance, so we emit exactly one barge-in signal
+    // per turn (on the first partial) and reset it when the turn is committed.
+    private volatile bool _utteranceActive;
+
+    private double _confidenceSum;
+    private int    _confidenceCount;
+    public double? AverageConfidence => _confidenceCount > 0 ? _confidenceSum / _confidenceCount : null;
+
+    public ChannelReader<bool> SpeechStartedEvents => _speechStarted.Reader;
+
+    public ElevenLabsScribeStreamingService(
+        IOptions<ElevenLabsSettings> settings,
+        ILogger<ElevenLabsScribeStreamingService> logger)
+    {
+        _settings = settings.Value;
+        _logger   = logger;
+    }
+
+    public async Task ConnectAsync(string language, CancellationToken ct)
+    {
+        _ws = new ClientWebSocket();
+        _ws.Options.SetRequestHeader("xi-api-key", _settings.ApiKey);
+
+        // Language hint: empty => auto-detect (multilingual). We deliberately leave this
+        // unset by default so the caller can speak any language and still be transcribed;
+        // the multilingual model handles Dutch natively and more accurately than Deepgram.
+        // Set ElevenLabs:ScribeLanguage to force a specific language (e.g. "nl").
+        var langHint = _settings.ScribeLanguage;
+
+        var url = $"{_settings.ScribeBaseUrl}/v1/speech-to-text/realtime"
+            + $"?model_id={Uri.EscapeDataString(_settings.ScribeModel)}"
+            + $"&audio_format=ulaw_8000"
+            + $"&commit_strategy=manual";
+        if (!string.IsNullOrWhiteSpace(langHint))
+            url += $"&language_code={Uri.EscapeDataString(langHint)}";
+
+        await _ws.ConnectAsync(new Uri(url), ct);
+        _receiveLoop = Task.Run(() => ReceiveLoopAsync(ct), CancellationToken.None);
+        _logger.LogDebug("ElevenLabs Scribe WebSocket connected (language_hint={LanguageHint})",
+            string.IsNullOrWhiteSpace(langHint) ? "auto" : langHint);
+    }
+
+    public async ValueTask SendAudioAsync(ReadOnlyMemory<byte> mulawBytes, CancellationToken ct)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        var msg = new JsonObject
+        {
+            ["message_type"]  = "input_audio_chunk",
+            ["audio_base_64"] = Convert.ToBase64String(mulawBytes.Span),
+            ["sample_rate"]   = 8000,
+        };
+        await SendJsonAsync(msg, ct);
+    }
+
+    public async Task CloseAudioAsync(CancellationToken ct)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        // Commit flushes any buffered audio into a final committed_transcript before the socket closes.
+        var msg = new JsonObject
+        {
+            ["message_type"] = "input_audio_chunk",
+            ["commit"]       = true,
+        };
+        await SendJsonAsync(msg, ct);
+    }
+
+    public IAsyncEnumerable<string> ReadTranscriptsAsync(CancellationToken ct) =>
+        _transcripts.Reader.ReadAllAsync(ct);
+
+    public void DrainPendingTranscripts()
+    {
+        while (_transcripts.Reader.TryRead(out _)) { }
+    }
+
+    // Provider tag used for the uniform [STT] comparison log line (see PublishTranscript).
+    private const string Provider = "scribe";
+
+    /// <summary>
+    /// Single funnel for finalised transcripts: writes to the channel and emits one
+    /// uniform, greppable log line so Flux / Nova-3 / Scribe can be compared on real calls.
+    /// </summary>
+    private void PublishTranscript(string text, double? confidence)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return;
+        _transcripts.Writer.TryWrite(text);
+        _logger.LogInformation("[STT] provider={Provider} confidence={Confidence} chars={Chars} transcript=\"{Transcript}\"",
+            Provider, confidence?.ToString("F2") ?? "n/a", text.Length, text);
+    }
+
+    private async Task SendJsonAsync(JsonNode msg, CancellationToken ct)
+    {
+        var bytes = Encoding.UTF8.GetBytes(msg.ToJsonString());
+        await _ws!.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, ct);
+    }
+
+    private async Task ReceiveLoopAsync(CancellationToken ct)
+    {
+        var buffer = new byte[16 * 1024];
+        var sb = new StringBuilder();
+
+        try
+        {
+            while (_ws?.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            {
+                sb.Clear();
+                WebSocketReceiveResult result;
+                do
+                {
+                    result = await _ws.ReceiveAsync(buffer, ct);
+                    if (result.MessageType == WebSocketMessageType.Close) goto closed;
+                    sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
+                } while (!result.EndOfMessage);
+
+                ProcessMessage(sb.ToString());
+            }
+
+            closed:;
+            _logger.LogDebug("ElevenLabs Scribe receive loop ended");
+        }
+        catch (OperationCanceledException) { }
+        catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
+        {
+            _logger.LogDebug("ElevenLabs Scribe WebSocket closed prematurely");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ElevenLabs Scribe receive loop error");
+        }
+        finally
+        {
+            _transcripts.Writer.TryComplete();
+            _speechStarted.Writer.TryComplete();
+        }
+    }
+
+    private void ProcessMessage(string json)
+    {
+        try
+        {
+            var root = JsonNode.Parse(json);
+            var type = root?["message_type"]?.GetValue<string>();
+
+            switch (type)
+            {
+                case "partial_transcript":
+                    HandlePartial(root!);
+                    return;
+
+                case "committed_transcript":
+                case "committed_transcript_with_timestamps":
+                    HandleCommitted(root!);
+                    return;
+
+                // Belt-and-suspenders: barge-in is also derived from the first partial above.
+                case "speech_started":
+                    _utteranceActive = true;
+                    _speechStarted.Writer.TryWrite(true);
+                    _logger.LogDebug("[SCRIBE] speech_started (VAD)");
+                    return;
+
+                case "error":
+                case "auth_error":
+                case "quota_exceeded":
+                case "commit_throttled":
+                case "rate_limited":
+                case "queue_overflow":
+                case "resource_exhausted":
+                case "session_time_limit_exceeded":
+                case "input_error":
+                case "chunk_size_exceeded":
+                case "insufficient_audio_activity":
+                case "transcriber_error":
+                    _logger.LogWarning("ElevenLabs Scribe error [{Type}]: {Body}", type, json);
+                    return;
+
+                default:
+                    _logger.LogDebug("ElevenLabs Scribe unhandled message_type: {Type}", type);
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse ElevenLabs Scribe message");
+        }
+    }
+
+    private void HandlePartial(JsonNode root)
+    {
+        var text = root["text"]?.GetValue<string>() ?? "";
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        // First partial of a new turn → caller has started speaking → barge-in signal.
+        if (!_utteranceActive)
+        {
+            _utteranceActive = true;
+            _speechStarted.Writer.TryWrite(true);
+            _logger.LogDebug("[SCRIBE] first partial → barge-in signal");
+        }
+    }
+
+    private void HandleCommitted(JsonNode root)
+    {
+        var text = root["text"]?.GetValue<string>() ?? "";
+        var confidence = root["confidence"]?.GetValue<double>();
+
+        // Turn is over regardless of whether it carried text.
+        _utteranceActive = false;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _logger.LogDebug("[SCRIBE] committed transcript empty — ignoring");
+            return;
+        }
+
+        if (confidence.HasValue)
+        {
+            _confidenceSum += confidence.Value;
+            _confidenceCount++;
+        }
+
+        PublishTranscript(text, confidence);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _transcripts.Writer.TryComplete();
+        _speechStarted.Writer.TryComplete();
+
+        if (_ws is not null)
+        {
+            try
+            {
+                if (_ws.State == WebSocketState.Open)
+                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            }
+            catch { }
+            _ws.Dispose();
+        }
+
+        if (_receiveLoop is not null)
+            await _receiveLoop.ConfigureAwait(false);
+    }
+}

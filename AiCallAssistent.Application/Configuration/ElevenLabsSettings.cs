@@ -15,4 +15,21 @@ public class ElevenLabsSettings
 
     /// <summary>0–4. Higher reduces streaming latency at a minor quality cost. 4 recommended for phone calls.</summary>
     public int OptimizeStreamingLatency { get; set; } = 4;
+
+    // ── Scribe v2 Realtime STT ────────────────────────────────────────────────
+    // Used only when Deepgram:SttProvider = "scribe". Reuses ApiKey above (same
+    // ElevenLabs account as TTS). See ElevenLabsScribeStreamingService.
+
+    /// <summary>Base host for the Scribe realtime WebSocket.</summary>
+    public string ScribeBaseUrl { get; set; } = "wss://api.elevenlabs.io";
+
+    /// <summary>Scribe realtime model id.</summary>
+    public string ScribeModel { get; set; } = "scribe_v2_realtime";
+
+    /// <summary>
+    /// Language hint for Scribe STT. Empty (default) = auto-detect across all supported
+    /// languages, so callers speaking any language are still transcribed. Set e.g. "nl"
+    /// to force Dutch (disables detection of other languages).
+    /// </summary>
+    public string ScribeLanguage { get; set; } = "";
 }
