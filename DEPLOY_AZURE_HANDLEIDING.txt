@@ -60,8 +60,7 @@ DEEL 1 — SLEUTELS OPHALEN
 - Op het hoofd-dashboard staan meteen:
   - Account SID  >> Bewaren als: Twilio__AccountSid
   - Auth Token (klik Show/Reveal)  >> Bewaren als: Twilio__AuthToken
-- Account (rechtsboven) > API keys & tokens > Create API key. Naam: voxflow. Type: Standard. Create.
-- Kopieer SID en Secret meteen (Secret zie je maar 1 keer).
+- (Optioneel, alleen als klanten in de app zelf een nummer kopen) Account (rechtsboven) > API keys & tokens > Create API key. Naam: voxflow. Type: Standard. Create. Kopieer SID en Secret meteen (Secret zie je maar 1 keer).
   >> Bewaren als: Twilio__ApiKeySid en Twilio__ApiKeySecret
 - Telefoonnummer koppelen (doe dit als je het Azure-adres uit DEEL 2 weet):
   Phone Numbers > Manage > Active numbers > klik het nummer.
@@ -141,68 +140,58 @@ DEEL 3 — SLEUTELS INVULLEN IN AZURE
 - Het zijn twee liggende streepjes __ , geen dubbele punt.
 - Onderaan klikken op Apply/Save en bevestigen. Sleutels werken pas na de herstart.
 
-3.2 DE LIJST (Naam = jouw waarde)
+3.2 VERPLICHT — deze MOET je invullen (Naam = jouw waarde)
 
-# Dev-modus:
 ASPNETCORE_ENVIRONMENT = Development
-
-# Database:
 ConnectionStrings__DefaultConnection = JOUW_SUPABASE_CONNECTION_STRING
-
-# Inloggen dashboard:
 Supabase__ProjectUrl = https://xxxx.supabase.co
-Supabase__WebhookSecret = (optioneel, anders overslaan)
-
-# AI-brein (Google Gemini):
 Gemini__ProjectId = JOUW_GOOGLE_PROJECT_ID
-Gemini__Location = europe-west4
-Gemini__Model = gemini-2.5-flash
 Gemini__ServiceAccountKeyJson = PLAK_HIER_DE_HELE_JSON
-
-# Spraak naar tekst (Deepgram):
 Deepgram__ApiKey = JOUW_DEEPGRAM_KEY
-Deepgram__SttProvider = flux
-Deepgram__Model = nova-3
-Deepgram__BaseUrl = wss://api.eu.deepgram.com
-
-# De stem (ElevenLabs):
 ElevenLabs__ApiKey = JOUW_ELEVENLABS_KEY
-ElevenLabs__Model = eleven_turbo_v2_5
-ElevenLabs__Language = nl
-
-# Telefonie (Twilio):
 Twilio__AccountSid = JOUW_TWILIO_ACCOUNT_SID
 Twilio__AuthToken = JOUW_TWILIO_AUTH_TOKEN
-Twilio__ApiKeySid = JOUW_TWILIO_API_KEY_SID
-Twilio__ApiKeySecret = JOUW_TWILIO_API_KEY_SECRET
 Twilio__BaseUrl = https://JOUW-AZURE-ADRES
-Twilio__WhatsAppFrom = whatsapp:+31... (optioneel)
-Twilio__VerifyServiceSid = VS... (optioneel)
-Twilio__BaseUrl moet exact het openbare Azure-adres zijn (met https://, zonder / aan het eind).
+Cors__AllowedOrigins__0 = https://FRONTEND-ADRES
 
-# Assistent:
-Assistant__DefaultCompanyId = 2
+- Twilio__BaseUrl moet exact het openbare Azure-adres zijn (met https://, zonder / aan het eind).
+- CORS: ook een www- of *.lovable.app adres? Voeg toe als Cors__AllowedOrigins__1, Cors__AllowedOrigins__2, enz.
 
-# E-mail (Gmail):
-Gmail__SenderEmail = info@voxflow.nl
-Gmail__SenderName = VoxFlow
-Gmail__AppPassword = JOUW_16_LETTER_APP_WACHTWOORD
 
-# Admin-login:
+3.3 OPTIONEEL — alleen invullen als je die functie gebruikt
+
+# Admin-paneel (inloggen op de admin):
 Admin__Username = JOUW_ADMIN_GEBRUIKERSNAAM
 Admin__Password = JOUW_STERKE_WACHTWOORD
 
-# Outlook-agenda (optioneel):
+# Bevestigingsmails:
+Gmail__SenderEmail = info@voxflow.nl
+Gmail__AppPassword = JOUW_16_LETTER_APP_WACHTWOORD
+
+# Nummers kopen / onboarding in de app:
+Twilio__ApiKeySid = JOUW_TWILIO_API_KEY_SID
+Twilio__ApiKeySecret = JOUW_TWILIO_API_KEY_SECRET
+
+# WhatsApp:
+Twilio__WhatsAppFrom = whatsapp:+31...
+
+# SMS-verificatie bij aanmelden:
+Twilio__VerifyServiceSid = VS...
+
+# Outlook-agenda koppelen:
 Outlook__ClientId = JOUW_OUTLOOK_CLIENT_ID
 Outlook__ClientSecret = JOUW_OUTLOOK_CLIENT_SECRET
 Outlook__RedirectUri = https://JOUW-AZURE-ADRES/api/integrations/outlook/callback
 Outlook__DashboardUrl = https://FRONTEND-ADRES/dashboard/integraties
 
-# Frontend toegang (CORS) — zie DEEL 4:
-Cors__AllowedOrigins__0 = https://FRONTEND-ADRES
-Cors__AllowedOrigins__1 = https://www.FRONTEND-ADRES
 
-Klik daarna Apply/Save onderaan en laat de app herstarten.
+3.4 NIET INVULLEN — dit zit al in de code
+
+Deze hoef je NIET toe te voegen; er zitten al vaste waarden in, of ze komen per bedrijf uit de database (dashboard):
+- Uit de database: de stem, taal, prompt, toon, begroeting, openingstijden, doorschakelnummers.
+- Vaste waarde in de code: Gemini__Model, Gemini__Location, ElevenLabs__Model, ElevenLabs__Language, Deepgram__Model, Deepgram__SttProvider, Deepgram__BaseUrl, Assistant__DefaultCompanyId, Assistant__WelcomeMessage, Gmail__SenderName.
+
+Klik na het invullen Apply/Save onderaan en laat de app herstarten.
 
 
 ==============================
@@ -236,15 +225,19 @@ DEEL 5 — CONTROLEREN
 SNELLE CHECKLIST
 ==============================
 
-Sleutels:
+Verplichte sleutels:
 [ ] Supabase: Project URL + anon key + connection string (Transaction pooler)
 [ ] Google Cloud: Project ID + Vertex AI ingeschakeld + service-account JSON
 [ ] Deepgram: API Key
 [ ] ElevenLabs: API Key
-[ ] Twilio: Account SID, Auth Token, API Key SID + Secret (+ evt. WhatsApp, Verify)
-[ ] Gmail: adres + app-wachtwoord (2FA aan)
-[ ] Outlook: Client ID + Secret + permissions (optioneel)
-[ ] Admin: gebruikersnaam + wachtwoord kiezen
+[ ] Twilio: Account SID + Auth Token
+
+Optioneel (per functie):
+[ ] Admin: gebruikersnaam + wachtwoord (admin-paneel)
+[ ] Gmail: adres + app-wachtwoord, 2FA aan (bevestigingsmails)
+[ ] Twilio: API Key SID + Secret (nummers kopen in de app)
+[ ] Twilio: WhatsApp-nummer / Verify Service SID
+[ ] Outlook: Client ID + Secret + permissions (agenda)
 
 Azure:
 [ ] Web App VoxFlow bestaat / aangemaakt (Linux, West Europe, .NET, B1)
