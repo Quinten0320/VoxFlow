@@ -52,8 +52,7 @@ DEEL 1 — SLEUTELS OPHALEN
 - Ga naar elevenlabs.io, log in.
 - Profielicoon rechtsboven > API Keys > Create API Key. Naam: voxflow. Rechten standaard. Create.
   >> Bewaren als: ElevenLabs__ApiKey
-- Andere stem? Voices > kies stem > "..." > Copy Voice ID.
-  >> Bewaren als: ElevenLabs__VoiceId (anders overslaan)
+- De stem wordt per bedrijf in het dashboard ingesteld. Geen Voice ID nodig hier.
 
 
 1.5 TWILIO (bellen + WhatsApp)
@@ -168,7 +167,6 @@ Deepgram__BaseUrl = wss://api.eu.deepgram.com
 
 # De stem (ElevenLabs):
 ElevenLabs__ApiKey = JOUW_ELEVENLABS_KEY
-ElevenLabs__VoiceId = yBtEjlHaWNu9xrYohjbA
 ElevenLabs__Model = eleven_turbo_v2_5
 ElevenLabs__Language = nl
 
@@ -242,7 +240,7 @@ Sleutels:
 [ ] Supabase: Project URL + anon key + connection string (Transaction pooler)
 [ ] Google Cloud: Project ID + Vertex AI ingeschakeld + service-account JSON
 [ ] Deepgram: API Key
-[ ] ElevenLabs: API Key (+ evt. Voice ID)
+[ ] ElevenLabs: API Key
 [ ] Twilio: Account SID, Auth Token, API Key SID + Secret (+ evt. WhatsApp, Verify)
 [ ] Gmail: adres + app-wachtwoord (2FA aan)
 [ ] Outlook: Client ID + Secret + permissions (optioneel)
