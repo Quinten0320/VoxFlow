@@ -1,0 +1,274 @@
+VOXFLOW LIVE ZETTEN OP AZURE — STAP VOOR STAP
+
+Deze handleiding is voor iemand zonder technische kennis. Volg de stappen van boven naar beneden. Je hoeft niets te programmeren: je maakt accounts/sleutels en plakt ze op de juiste plek in Azure.
+
+Wat gaan we doen:
+1) Bij elke dienst de juiste sleutel ophalen
+2) De backend op Azure zetten
+3) Alle sleutels in Azure invullen (environment variables)
+4) De server in dev-modus zetten
+5) De frontend (Lovable) koppelen aan de backend
+
+Reken op 1 a 2 uur de eerste keer.
+
+Handig: maak een leeg kladblok/Word-document. Plak elke sleutel er meteen in zodra je hem hebt. In DEEL 3 plak je ze in Azure.
+
+
+==============================
+DEEL 1 — SLEUTELS OPHALEN
+==============================
+
+
+1.1 SUPABASE (database + inloggen)
+- Ga naar supabase.com, log in, open het project.
+- Project Settings (tandwiel) > Data API (of API): kopieer de Project URL (https://xxxx.supabase.co).
+  >> Bewaren als: Supabase__ProjectUrl
+- Database > Connection string > kies tab "Transaction pooler" (NIET Direct connection). Kies formaat .NET als dat er staat, anders URI. Vervang [YOUR-PASSWORD] door het database-wachtwoord (wachtwoord kwijt? klik Reset database password).
+  >> Bewaren als: ConnectionStrings__DefaultConnection
+- De database-tabellen worden een keer met de hand aangemaakt via de SQL Editor in Supabase (de .sql bestanden uit de map "migrations" plakken en op Run klikken). Bestaat de database al en is die gevuld? Dan overslaan.
+
+
+1.2 GOOGLE CLOUD / GEMINI (het "brein")
+- Ga naar console.cloud.google.com, log in, kies of maak een project.
+- Klik bovenin op de projectnaam en kopieer de Project ID (kleine letters, bv voxflow-123456).
+  >> Bewaren als: Gemini__ProjectId
+- Zoek bovenin naar "Vertex AI API", open het, klik Enable (inschakelen).
+- IAM & Admin > Service Accounts > Create service account. Naam: voxflow-vertex. Rol (role): Vertex AI User. Klik Done.
+- Klik op die service account > tab Keys > Add key > Create new key > JSON > Create. Er wordt een .json bestand gedownload. Open het met Kladblok en kopieer de HELE inhoud (alles van { tot }).
+  >> Bewaren als: Gemini__ServiceAccountKeyJson
+
+
+1.3 DEEPGRAM (spraak naar tekst)
+- Ga naar console.deepgram.com, log in.
+- API Keys > Create a New API Key. Naam: voxflow. Rechten standaard laten. Create.
+- Kopieer de sleutel METEEN (wordt maar 1 keer getoond).
+  >> Bewaren als: Deepgram__ApiKey
+
+
+1.4 ELEVENLABS (de stem)
+- Ga naar elevenlabs.io, log in.
+- Profielicoon rechtsboven > API Keys > Create API Key. Naam: voxflow. Rechten mogen standaard. Create.
+  >> Bewaren als: ElevenLabs__ApiKey
+- Andere stem gewenst? Voices > kies stem > "..." > Copy Voice ID.
+  >> Bewaren als: ElevenLabs__VoiceId (anders overslaan, standaardstem staat al ingesteld)
+
+
+1.5 TWILIO (bellen + WhatsApp)
+- Ga naar console.twilio.com, log in.
+- Op het hoofd-dashboard staan meteen:
+  - Account SID  >> Bewaren als: Twilio__AccountSid
+  - Auth Token (klik Show/Reveal)  >> Bewaren als: Twilio__AuthToken
+- API key aanmaken: Account (rechtsboven) > API keys & tokens > Create API key. Naam: voxflow. Type: Standard. Create.
+  - Kopieer SID en Secret meteen (Secret zie je maar 1 keer!).
+  >> Bewaren als: Twilio__ApiKeySid en Twilio__ApiKeySecret
+- Telefoonnummer koppelen (doe dit als je het Azure-adres uit DEEL 2 weet):
+  Phone Numbers > Manage > Active numbers > klik het nummer.
+  - Voice Configuration > "A call comes in" > Webhook > https://JOUW-AZURE-ADRES/api/twilio/answer > methode HTTP POST
+  - Call status changes (status callback) > https://JOUW-AZURE-ADRES/api/twilio/status > HTTP POST
+  - Save
+- WhatsApp (optioneel): Messaging > Senders > WhatsApp senders. Nummer in de vorm whatsapp:+31...
+  >> Bewaren als: Twilio__WhatsAppFrom (anders leeg laten)
+- SMS-verificatie (optioneel): Verify > Services > kopieer Service SID (VS...).
+  >> Bewaren als: Twilio__VerifyServiceSid (anders leeg laten)
+
+
+1.6 GMAIL (bevestigingsmails)
+- Log in op het Google-account dat de mails verstuurt.
+- myaccount.google.com/security > zet 2-stapsverificatie AAN (verplicht voor de volgende stap).
+- myaccount.google.com/apppasswords > app-naam VoxFlow > Create. Google toont 16 letters. Kopieer die ZONDER de spaties.
+  >> Bewaren als: Gmail__AppPassword
+- Het e-mailadres zelf (bv info@voxflow.nl)
+  >> Bewaren als: Gmail__SenderEmail
+
+
+1.7 OUTLOOK-AGENDA (optioneel — alleen als klanten hun agenda willen koppelen)
+- portal.azure.com > zoek "App registrations" > New registration. Naam: VoxFlow Outlook. Redirect URI: type Web + https://JOUW-AZURE-ADRES/api/integrations/outlook/callback > Register.
+- Kopieer Application (client) ID.
+  >> Bewaren als: Outlook__ClientId
+- Certificates & secrets > New client secret > Add. Kopieer de Value meteen.
+  >> Bewaren als: Outlook__ClientSecret
+- API permissions > Add a permission > Microsoft Graph > Delegated permissions > vink aan: Calendars.ReadWrite, offline_access, User.Read > Add permissions.
+
+
+1.8 ADMIN-INLOG (zelf kiezen)
+- Verzin zelf een gebruikersnaam  >> Admin__Username
+- Verzin zelf een sterk wachtwoord  >> Admin__Password
+
+
+==============================
+DEEL 2 — BACKEND OP AZURE ZETTEN
+==============================
+
+De app "VoxFlow" bestaat waarschijnlijk al. We controleren of maken hem opnieuw.
+
+2.1 Bestaat de app al?
+- portal.azure.com > zoek bovenin "App Services".
+- Staat "VoxFlow" in de lijst? Ga door naar DEEL 3.
+- Niet? Maak hem aan met 2.2.
+
+2.2 Nieuwe Web App aanmaken (alleen als hij niet bestaat)
+- App Services > Create > Web App. Vul in:
+  - Resource group: bestaande of nieuwe (voxflow-rg)
+  - Name: voxflow
+  - Publish: Code
+  - Runtime stack: .NET 10 (of de nieuwste .NET)
+  - Operating System: Linux
+  - Region: West Europe
+  - Pricing plan: Basic B1
+- Review + create > Create. Wachten tot klaar.
+
+2.3 Automatisch deployen vanuit GitHub
+- Open de Web App > Deployment Center.
+- Source: GitHub > log in > autoriseer.
+- Kies organisatie, repository (aicallassistent) en Branch: Master.
+- Build provider: GitHub Actions > Save.
+- Vanaf nu wordt elke wijziging automatisch uitgerold. (Draait er al een groene GitHub Actions build? Dan overslaan.)
+
+2.4 WEB SOCKETS AAN ZETTEN (VERPLICHT!)
+Zonder dit valt elk telefoongesprek meteen weg.
+- Web App > Settings > Configuration > tab General settings (of Platform settings).
+- Web sockets > zet op On.
+- Always on > zet op On (app blijft draaien, mails blijven werken).
+- Save bovenaan.
+
+
+==============================
+DEEL 3 — SLEUTELS INVULLEN IN AZURE
+==============================
+
+3.1 Waar?
+- Web App VoxFlow > Settings > Environment variables (heette vroeger Application settings).
+- Onder App settings klik je telkens op "+ Add".
+- Bij Name de naam (bv Deepgram__ApiKey), bij Value jouw sleutel.
+- LET OP: het zijn twee liggende streepjes __ , geen dubbele punt.
+- Onderaan klikken op Apply/Save en bevestigen. Sleutels werken pas na de herstart.
+
+3.2 DE LIJST (Naam = jouw waarde)
+
+# Dev-modus aanzetten:
+ASPNETCORE_ENVIRONMENT = Development
+
+# Database:
+ConnectionStrings__DefaultConnection = JOUW_SUPABASE_CONNECTION_STRING
+
+# Inloggen dashboard:
+Supabase__ProjectUrl = https://xxxx.supabase.co
+Supabase__WebhookSecret = (optioneel, anders overslaan)
+
+# AI-brein (Google Gemini):
+Gemini__ProjectId = JOUW_GOOGLE_PROJECT_ID
+Gemini__Location = europe-west4
+Gemini__Model = gemini-2.5-flash
+Gemini__ServiceAccountKeyJson = PLAK_HIER_DE_HELE_JSON
+
+# Spraak naar tekst (Deepgram):
+Deepgram__ApiKey = JOUW_DEEPGRAM_KEY
+Deepgram__SttProvider = flux
+Deepgram__Model = nova-3
+Deepgram__BaseUrl = wss://api.eu.deepgram.com
+
+# De stem (ElevenLabs):
+ElevenLabs__ApiKey = JOUW_ELEVENLABS_KEY
+ElevenLabs__VoiceId = yBtEjlHaWNu9xrYohjbA
+ElevenLabs__Model = eleven_turbo_v2_5
+ElevenLabs__Language = nl
+
+# Telefonie (Twilio):
+Twilio__AccountSid = JOUW_TWILIO_ACCOUNT_SID
+Twilio__AuthToken = JOUW_TWILIO_AUTH_TOKEN
+Twilio__ApiKeySid = JOUW_TWILIO_API_KEY_SID
+Twilio__ApiKeySecret = JOUW_TWILIO_API_KEY_SECRET
+Twilio__BaseUrl = https://JOUW-AZURE-ADRES
+Twilio__WhatsAppFrom = whatsapp:+31... (optioneel)
+Twilio__VerifyServiceSid = VS... (optioneel)
+LET OP: Twilio__BaseUrl MOET exact het openbare Azure-adres zijn (met https://, zonder / aan het eind). Fout hier = telefoontjes werken stilletjes niet.
+
+# Assistent:
+Assistant__DefaultCompanyId = 2
+
+# E-mail (Gmail):
+Gmail__SenderEmail = info@voxflow.nl
+Gmail__SenderName = VoxFlow
+Gmail__AppPassword = JOUW_16_LETTER_APP_WACHTWOORD
+
+# Admin-login (zelf gekozen):
+Admin__Username = JOUW_ADMIN_GEBRUIKERSNAAM
+Admin__Password = JOUW_STERKE_WACHTWOORD
+
+# Outlook-agenda (optioneel):
+Outlook__ClientId = JOUW_OUTLOOK_CLIENT_ID
+Outlook__ClientSecret = JOUW_OUTLOOK_CLIENT_SECRET
+Outlook__RedirectUri = https://JOUW-AZURE-ADRES/api/integrations/outlook/callback
+Outlook__DashboardUrl = https://FRONTEND-ADRES/dashboard/integraties
+
+# Frontend toegang geven (CORS) — zie DEEL 4:
+Cors__AllowedOrigins__0 = https://FRONTEND-ADRES
+Cors__AllowedOrigins__1 = https://www.FRONTEND-ADRES
+
+Klaar met invullen? Klik Apply/Save onderaan en laat de app herstarten.
+
+Uitleg dev-modus: ASPNETCORE_ENVIRONMENT = Development zet de server in dev-modus (testpagina op /swagger staat aan, strenge HTTPS-omleiding uit). Later "productie" gewenst? Verander de waarde in Production en herstart.
+
+
+==============================
+DEEL 4 — FRONTEND (LOVABLE) KOPPELEN
+==============================
+
+Twee dingen moeten kloppen: de frontend moet weten waar de backend staat, en de backend moet de frontend toestaan (CORS).
+
+4.1 In Lovable — backend-adres instellen
+- Open het project in Lovable.
+- De frontend gebruikt een "API base URL" (vaak VITE_API_URL of VITE_API_BASE_URL). Weet je de naam niet? Vraag in de Lovable-chat: "Welke environment variable gebruikt de app voor de backend-URL?"
+- Zet die waarde op het Azure-adres van de backend, bv: https://voxflow-xxxx.westeurope-01.azurewebsites.net (dus NIET localhost).
+- Ook de Supabase-instellingen in de frontend moeten kloppen: Project URL + de "anon public key" (Supabase > Project Settings > API). Vul die in Lovable in.
+- Publiceer de frontend in Lovable en noteer het openbare adres (bv https://voxflow.nl of een *.lovable.app adres).
+
+4.2 In Azure — de frontend toestaan (CORS)
+- Cors__AllowedOrigins__0 = het exacte frontend-adres, met https://, ZONDER / op het eind (bv https://voxflow.nl).
+- Ook een www-variant of *.lovable.app adres? Voeg toe als Cors__AllowedOrigins__1, __2, enz.
+- Het adres moet EXACT kloppen (hoofd/kleine letters, https, geen / op het eind). Klopt het niet, dan geeft de site CORS-fouten en laden de gegevens niet.
+- Apply/Save in Azure > app herstart > koppeling actief.
+
+
+==============================
+DEEL 5 — CONTROLEREN OF ALLES WERKT
+==============================
+
+1) Backend leeft? Open in de browser: https://JOUW-AZURE-ADRES/swagger
+   Zie je een testpagina met endpoints? Dan draait de backend (dev-modus werkt). Zo niet: controleer ASPNETCORE_ENVIRONMENT = Development en herstart.
+2) Database verbonden? Log in het dashboard in of open een lijst. Geen fout = database + inloggen werken.
+3) Frontend praat met backend? Doe een actie die gegevens ophaalt. Werkt het niet? Druk F12 in de browser > tab Console. Staat er "CORS"? Frontend-adres toevoegen bij Cors__AllowedOrigins. Staat er "401"? Inlog/token-probleem.
+4) Bel-test: bel het Twilio-nummer. De assistent hoort op te nemen en te praten. Neemt hij niet op of valt weg? Controleer: Web sockets = On, Twilio__BaseUrl exact het Azure-adres, en de Twilio-webhook .../api/twilio/answer.
+
+
+==============================
+SNELLE CHECKLIST
+==============================
+
+Sleutels:
+[ ] Supabase: Project URL + connection string (Transaction pooler)
+[ ] Google Cloud: Project ID + Vertex AI ingeschakeld + service-account JSON
+[ ] Deepgram: API Key
+[ ] ElevenLabs: API Key (+ evt. Voice ID)
+[ ] Twilio: Account SID, Auth Token, API Key SID + Secret (+ evt. WhatsApp, Verify)
+[ ] Gmail: adres + app-wachtwoord (2FA aan)
+[ ] Outlook: Client ID + Secret + permissions (optioneel)
+[ ] Admin: zelf gebruikersnaam + wachtwoord kiezen
+
+Azure:
+[ ] Web App VoxFlow bestaat / aangemaakt (Linux, West Europe, .NET, B1)
+[ ] Deployment Center gekoppeld aan GitHub Master
+[ ] Web sockets = On EN Always on = On
+[ ] Alle environment variables ingevuld (DEEL 3)
+[ ] ASPNETCORE_ENVIRONMENT = Development
+[ ] Op Apply/Save geklikt > app herstart
+
+Koppelingen:
+[ ] Twilio-nummer wijst naar .../api/twilio/answer en .../api/twilio/status
+[ ] Frontend (Lovable) API-URL = Azure-adres
+[ ] Frontend-adres staat in Cors__AllowedOrigins
+
+Testen:
+[ ] /swagger opent
+[ ] Dashboard-login werkt
+[ ] Bel-test: assistent neemt op en praat
